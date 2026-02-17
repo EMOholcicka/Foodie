@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import jwt
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 
 _hasher = PasswordHasher()
@@ -17,9 +17,15 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(*, password: str, password_hash: str) -> bool:
+    """Return True if password matches; never raise due to bad stored hash.
+
+    Argon2 raises InvalidHashError if the stored hash isn't a valid encoded Argon2 hash.
+    That should be treated as "invalid credentials" (401), not a 500.
+    """
+
     try:
         return _hasher.verify(password_hash, password)
-    except VerifyMismatchError:
+    except (VerifyMismatchError, InvalidHashError):
         return False
 
 

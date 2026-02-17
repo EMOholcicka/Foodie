@@ -2,6 +2,53 @@
 
 Alembic lives under [`apps/api/alembic/`](apps/api/alembic/:1) with config in [`apps/api/alembic.ini`](apps/api/alembic.ini:1).
 
+## Demo seed data
+
+A demo seed migration exists to make the app immediately usable for screenshots/demos.
+
+It creates a dedicated demo account plus demo foods/recipes and a generated weekly plan for the current week start (Monday).
+
+- Demo email: `demo@foodie.local`
+- Demo password: `demo1234`
+
+### Apply demo data
+
+In dev, [`docker-compose.yml`](docker-compose.yml:1) enables demo seed data **by default** for the dedicated `migrate` job (so `docker compose up` gives you a usable demo account immediately).
+
+To disable demo seeding in dev:
+
+```bash
+FOODIE_DEMO_SEED=0 docker compose up --build
+```
+
+Manual / non-compose runs remain **opt-in** and are **NOT** applied by default when you run:
+
+```bash
+alembic -c apps/api/alembic.ini upgrade head
+```
+
+To seed demo data, explicitly enable it for the migration run:
+
+```bash
+FOODIE_DEMO_SEED=1 alembic -c apps/api/alembic.ini upgrade head
+```
+
+Production warning:
+- Do **not** enable `FOODIE_DEMO_SEED` in production.
+- The demo seed inserts a known demo user (`demo@foodie.local`) with a known password intended only for local/dev/demo environments.
+
+### Remove demo data (optional)
+
+Downgrade the last migration:
+
+```bash
+alembic -c apps/api/alembic.ini downgrade -1
+```
+
+Notes:
+- The seed is designed to be idempotent (safe to re-run).
+- Demo foods/recipes are user-owned (scoped to the demo user), so they don't pollute global/shared data.
+
 ## Dev: apply migrations via dedicated compose job
 
 In dev, migrations are run by a dedicated one-off compose service (`migrate`) which executes `alembic upgrade head` and then exits.

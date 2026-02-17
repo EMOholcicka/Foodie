@@ -1,4 +1,5 @@
 import EventNoteIcon from "@mui/icons-material/EventNote";
+import LogoutIcon from "@mui/icons-material/Logout";
 import MonitorWeightIcon from "@mui/icons-material/MonitorWeight";
 import RestaurantMenuIcon from "@mui/icons-material/RestaurantMenu";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -9,9 +10,10 @@ import {
   Box,
   BottomNavigation,
   BottomNavigationAction,
-  Button,
   Container,
+  IconButton,
   Toolbar,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -39,7 +41,20 @@ export function AppShell() {
 
   return (
     <Box sx={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
-      <AppBar position="sticky" elevation={0} color="transparent">
+      <AppBar
+        position="sticky"
+        elevation={0}
+        color="transparent"
+        sx={{
+          borderBottom: (t) => `1px solid ${t.palette.divider}`,
+          // fallback for browsers without backdrop-filter support
+          bgcolor: (t) => `${t.palette.background.default}cc`,
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
+          backgroundImage: (t) =>
+            `linear-gradient(180deg, ${t.palette.background.default}cc 0%, ${t.palette.background.default}66 100%)`,
+        }}
+      >
         <Toolbar>
           <Container
             maxWidth="md"
@@ -51,21 +66,27 @@ export function AppShell() {
               <Typography variant="caption" color="text.secondary">
                 Phase 7
               </Typography>
-              <Button
-                size="small"
-                variant="text"
-                color="inherit"
-                onClick={() => {
-                  clearTokens();
-                  navigate("/auth", { replace: true });
-                }}
-              >
-                Logout
-              </Button>
+
+              <Tooltip title="Logout">
+                <IconButton
+                  aria-label="Logout"
+                  color="inherit"
+                  onClick={() => {
+                    clearTokens();
+                    navigate("/auth", { replace: true });
+                  }}
+                  sx={{ minHeight: 44, minWidth: 44 }}
+                >
+                  <LogoutIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
             </Box>
           </Container>
         </Toolbar>
       </AppBar>
+
+      {/* Spacer that matches MUI Toolbar minHeight (56px xs / 64px sm+) */}
+      <Toolbar />
 
       <Box component="main" sx={{ flex: 1 }}>
         <Outlet />

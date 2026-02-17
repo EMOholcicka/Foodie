@@ -25,6 +25,9 @@ services:
     restart: "no"
     environment:
       ENV: dev
+      # Enable demo seed data by default for dev compose migrations.
+      # Disable by running with: FOODIE_DEMO_SEED=0 docker compose up
+      FOODIE_DEMO_SEED: ${FOODIE_DEMO_SEED:-1}
       # Make `import app` work for alembic env.py
       PYTHONPATH: /app
       ALEMBIC_INI: /app/alembic.ini
