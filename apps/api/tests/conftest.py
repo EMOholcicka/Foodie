@@ -13,9 +13,12 @@ import sqlalchemy as sa
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.settings import get_settings
 from app.db.session import get_db_session
 from app.main import create_app
 from app.models.base import Base
+
+
 
 
 @pytest.fixture(scope="session")
@@ -211,6 +214,13 @@ async def _create_schema(engine: AsyncEngine) -> None:
                 """
             )
         )
+
+
+@pytest.fixture(autouse=True)
+def _reset_settings_cache() -> None:
+    # Tests mutate env vars (e.g. CORS_ORIGINS) and expect create_app() to see them.
+    # Settings are cached by @lru_cache, so clear between tests.
+    get_settings.cache_clear()
 
 
 @pytest.fixture()

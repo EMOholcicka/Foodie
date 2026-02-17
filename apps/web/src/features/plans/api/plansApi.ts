@@ -73,6 +73,18 @@ export async function generateWeeklyPlan(payload: WeeklyPlanGenerateRequest): Pr
   return data;
 }
 
+export type SwapWeeklyPlanMealRequest = {
+  date: string; // YYYY-MM-DD
+  meal_type: MealType;
+  new_recipe_id: string;
+  lock?: boolean; // default true
+};
+
+export async function swapWeeklyPlanMeal(weekStart: string, payload: SwapWeeklyPlanMealRequest): Promise<WeeklyPlan> {
+  const { data } = await http.patch<WeeklyPlan>(`/plans/weekly/${weekStart}/meals:swap`, payload);
+  return data;
+}
+
 export async function getWeeklyPlan(weekStart: string): Promise<WeeklyPlan> {
   const { data } = await http.get<WeeklyPlan>(`/plans/weekly/${weekStart}`);
   return data;

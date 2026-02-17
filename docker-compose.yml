@@ -17,19 +17,56 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build:
+      context: ./apps/api
+      target: dev
+    # One-off job that applies migrations and exits.
+    restart: "no"
+    environment:
+      ENV: dev
+      # Make `import app` work for alembic env.py
+      PYTHONPATH: /app
+      ALEMBIC_INI: /app/alembic.ini
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://foodie:foodie@db:5432/foodie}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./apps/api/app:/app/app
+      - ./apps/api/alembic.ini:/app/alembic.ini:ro
+      - ./apps/api/alembic:/app/alembic
+    command:
+      - /bin/sh
+      - -lc
+      - alembic -c /app/alembic.ini upgrade head
+
   api:
     build:
       context: ./apps/api
       target: dev
     restart: unless-stopped
     environment:
+      ENV: dev
+      # Ensure alembic config location is consistent with the migrate job.
+      ALEMBIC_INI: /app/alembic.ini
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://foodie:foodie@db:5432/foodie}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost}
+    # NOTE: For maximum portability across Docker Compose implementations,
+    # prefer running migrations explicitly before bringing the stack up:
+    #   docker compose run --rm migrate
+    #   docker compose up --build
+    #
+    # The dependency below works on Docker Compose v2+ but may be ignored by other implementations.
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - ./apps/api/app:/app/app
+      - ./apps/api/alembic.ini:/app/alembic.ini:ro
+      - ./apps/api/alembic:/app/alembic
     ports:
       - "${API_PORT:-8000}:8000"
     healthcheck:
@@ -37,6 +74,39 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  api-test:
+    build:
+      context: ./apps/api
+      target: test
+    # No need to restart; it's a one-off runner
+    restart: "no"
+    environment:
+      # Ensure `import app` works regardless of where pytest is invoked from.
+      PYTHONPATH: /app
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://foodie:foodie@db:5432/foodie}
+      # Ensure tests never trigger in-process auto-migrate.
+      AUTO_MIGRATE: "0"
+      # Keep consistent alembic config location with the api dev container.
+      ALEMBIC_INI: /app/alembic.ini
+      # Tests may call the app in-process; CORS irrelevant but harmless.
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost}
+    depends_on:
+      db:
+        condition: service_healthy
+    # Allow rapid iteration on tests and app code without rebuild.
+    volumes:
+      - ./apps/api/app:/app/app
+      - ./apps/api/tests:/app/tests
+      - ./apps/api/pytest.ini:/app/pytest.ini:ro
+      - ./apps/api/alembic.ini:/app/alembic.ini:ro
+      - ./apps/api/alembic:/app/alembic:ro
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        alembic -c /app/alembic.ini upgrade head
+        pytest -q
 
   web:
     build:

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud import plans as crud_plans
 from app.db.session import get_db_session
 from app.routes.deps import get_current_user
-from app.schemas.plans import GroceryListOut, GroceryListItemOut, GenerateWeeklyPlanRequest, WeeklyPlanOut
+from app.schemas.plans import GroceryListOut, GroceryListItemOut, GenerateWeeklyPlanRequest, SwapWeeklyPlanMealRequest, WeeklyPlanOut
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
@@ -33,6 +33,27 @@ async def generate_weekly_plan(
     # atomic and tests can control rollback.
     await session.flush()
 
+    return WeeklyPlanOut.model_validate(plan)
+
+
+@router.patch("/weekly/{week_start}/meals:swap", response_model=WeeklyPlanOut)
+async def swap_weekly_plan_meal(
+    week_start: date,
+    payload: SwapWeeklyPlanMealRequest,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    try:
+        plan = await crud_plans.swap_weekly_plan_meal_for_user(
+            session=session,
+            user_id=current_user.id,
+            week_start=week_start,
+            payload=payload,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+    await session.flush()
     return WeeklyPlanOut.model_validate(plan)
 
 

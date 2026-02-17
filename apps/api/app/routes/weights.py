@@ -61,8 +61,8 @@ async def create_weight(
 async def list_weights(
     from_: datetime | None = Query(default=None, alias="from"),
     to: datetime | None = Query(default=None, alias="to"),
-    session: AsyncSession = Depends(get_db_session),
     user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
 ) -> dict:
     from_dt = _normalize_query_dt(from_)
     to_dt = _normalize_query_dt(to)

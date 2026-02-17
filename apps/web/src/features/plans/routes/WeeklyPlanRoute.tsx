@@ -1,6 +1,6 @@
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 import LocalGroceryStoreIcon from "@mui/icons-material/LocalGroceryStore";
 import {
   Alert,
@@ -10,6 +10,7 @@ import {
   Chip,
   Container,
   Dialog,
+  DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
@@ -33,7 +34,7 @@ import dayjs from "dayjs";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { useGenerateWeeklyPlanMutation, useWeeklyPlanQuery } from "../api/plansQueries";
+import { useGenerateWeeklyPlanMutation, useSwapWeeklyPlanMealMutation, useWeeklyPlanQuery } from "../api/plansQueries";
 import {
   fmtDate,
   getWeekStartFromUrlOrStorage,
@@ -43,7 +44,8 @@ import {
   weekLabel,
   weekdays,
 } from "../domain/week";
-import type { MealType, WeeklyPlanDay, WeeklyPlanGenerateRequest, WeeklyPlanMeal } from "../api/plansApi";
+import type { MealType, SwapWeeklyPlanMealRequest, WeeklyPlanDay, WeeklyPlanGenerateRequest, WeeklyPlanMeal } from "../api/plansApi";
+import { useRecipesListQuery } from "../../recipes/api/recipesQueries";
 
 type TrainingDayType = "lift" | "run" | "rest";
 
@@ -73,7 +75,9 @@ function PlanSubNav({ tab, weekStart }: { tab: PlanTab; weekStart: string }) {
       value={tab}
       onChange={(_, v) => {
         if (!v) return;
-        navigate(v === "plan" ? `/plan?week=${encodeURIComponent(weekStart)}` : `/plan/grocery?week=${encodeURIComponent(weekStart)}`);
+        navigate(
+          v === "plan" ? `/plan?week=${encodeURIComponent(weekStart)}` : `/plan/grocery?week=${encodeURIComponent(weekStart)}`
+        );
       }}
       aria-label="Plan section navigation"
       sx={{
@@ -153,8 +157,12 @@ export function WeeklyPlanRoute() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeDate, setActiveDate] = useState<string | null>(null);
 
+  const recipesQuery = useRecipesListQuery();
+  const swapMutation = useSwapWeeklyPlanMealMutation(weekStart);
+
   const [swapOpen, setSwapOpen] = useState(false);
   const [swapMeal, setSwapMeal] = useState<{ date: string; meal: WeeklyPlanMeal } | null>(null);
+  const [swapRecipeId, setSwapRecipeId] = useState<string>("");
 
   const weekDays = useMemo(() => {
     return weekdays().map((i) => {
@@ -206,7 +214,7 @@ export function WeeklyPlanRoute() {
         {/* Compact header/toolbar */}
         <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
           <Stack spacing={0.25} sx={{ minWidth: 0 }}>
-            <Typography variant="h6" noWrap>
+            <Typography variant="h6" component="h1" noWrap>
               Weekly plan
             </Typography>
             <Typography variant="caption" color="text.secondary" noWrap>
@@ -288,7 +296,8 @@ export function WeeklyPlanRoute() {
                     alignItems: "stretch",
                     borderRadius: 2,
                     bgcolor: "background.paper",
-                    boxShadow: (t) => (isActive ? `0 0 0 2px ${t.palette.primary.main}` : `0 0 0 1px ${t.palette.divider}`),
+                    boxShadow: (t) =>
+                      isActive ? `0 0 0 2px ${t.palette.primary.main}` : `0 0 0 1px ${t.palette.divider}`,
                     transition: "box-shadow 120ms ease",
                     "&:hover": {
                       boxShadow: (t) => `0 0 0 2px ${t.palette.action.selected}`,
@@ -421,7 +430,7 @@ export function WeeklyPlanRoute() {
 
             <Divider />
             <Typography variant="caption" color="text.secondary">
-              Swap/Lock controls are coming soon and will appear here once they persist server-side.
+              Swap meals: open a day and use “Swap”.
             </Typography>
           </Stack>
         </Box>
@@ -441,14 +450,7 @@ export function WeeklyPlanRoute() {
               <Button onClick={() => setDrawerOpen(false)}>Close</Button>
             </Stack>
 
-            {drawerDay ? (
-              <MacroLine
-                kcal={drawerDay.totals.kcal}
-                p={drawerDay.totals.protein_g}
-                c={drawerDay.totals.carbs_g}
-                f={drawerDay.totals.fat_g}
-              />
-            ) : null}
+            {drawerDay ? <MacroLine kcal={drawerDay.totals.kcal} p={drawerDay.totals.protein_g} c={drawerDay.totals.carbs_g} f={drawerDay.totals.fat_g} /> : null}
 
             <Stack spacing={1}>
               {(drawerDay?.meals ?? [])
@@ -474,56 +476,100 @@ export function WeeklyPlanRoute() {
                         </Typography>
                         <MacroLine kcal={m.totals.kcal} p={m.totals.protein_g} c={m.totals.carbs_g} f={m.totals.fat_g} />
                       </Box>
-                      <Chip size="small" label="Coming soon" variant="outlined" />
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<SwapHorizIcon />}
+                        onClick={() => {
+                          if (!drawerDay?.date) return;
+                          setSwapMeal({ date: drawerDay.date, meal: m });
+                          setSwapRecipeId(m.recipe_id ?? "");
+                          setSwapOpen(true);
+                        }}
+                        aria-label={`Swap ${m.meal_type}`}
+                      >
+                        Swap
+                      </Button>
                     </Stack>
                   </Box>
                 ))}
             </Stack>
 
-            <Button
-              variant="outlined"
-              startIcon={<LocalGroceryStoreIcon />}
-              onClick={() => navigate(`/plan/grocery?week=${encodeURIComponent(weekStart)}`)}
-            >
-              Open grocery list
-            </Button>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+              <Button
+                fullWidth
+                variant="contained"
+                onClick={() => {
+                  if (!drawerDay?.date) return;
+                  navigate(`/day/${drawerDay.date}`);
+                }}
+                aria-label="Open day log"
+              >
+                Open day log
+              </Button>
+              <Button
+                fullWidth
+                variant="outlined"
+                startIcon={<LocalGroceryStoreIcon />}
+                onClick={() => navigate(`/plan/grocery?week=${encodeURIComponent(weekStart)}`)}
+              >
+                Open grocery list
+              </Button>
+            </Stack>
           </Stack>
         </Container>
       </Drawer>
 
-      {/* Swap dialog (recipe selector placeholder) */}
-      <Dialog open={swapOpen} onClose={() => setSwapOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Swap meal</DialogTitle>
+      <Dialog open={swapOpen} onClose={() => setSwapOpen(false)} fullWidth maxWidth="sm" aria-labelledby="swap-meal-title">
+        <DialogTitle id="swap-meal-title">Swap meal</DialogTitle>
         <DialogContent>
-          <Stack spacing={2}>
-            <Alert severity="info">
-              Recipe selector UI is stubbed in Phase 7 frontend. Hook your existing recipe list/search component here.
-            </Alert>
-            <Box
-              sx={{
-                border: (t) => `1px solid ${t.palette.divider}`,
-                borderRadius: 2,
-                p: 2,
-              }}
-            >
-              <Typography variant="subtitle2">Selected</Typography>
-              <Typography variant="body2">{swapMeal ? `${swapMeal.date} • ${swapMeal.meal.meal_type}` : "—"}</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {swapMeal?.meal.recipe_name ?? "—"}
-              </Typography>
-            </Box>
-            <Button
-              variant="contained"
-              startIcon={<ContentCopyIcon />}
-              onClick={() => {
-                // Placeholder action
-                setSwapOpen(false);
-              }}
-            >
-              Pick recipe (placeholder)
-            </Button>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              {swapMeal ? `${swapMeal.date} • ${swapMeal.meal.meal_type}` : ""}
+            </Typography>
+
+            {recipesQuery.isLoading ? <LinearProgress /> : null}
+
+            <FormControl fullWidth size="small">
+              <InputLabel id="swap-recipe-label">Recipe</InputLabel>
+              <Select
+                labelId="swap-recipe-label"
+                label="Recipe"
+                value={swapRecipeId}
+                onChange={(e) => setSwapRecipeId(String(e.target.value))}
+                data-testid="swap-recipe-select"
+              >
+                {(recipesQuery.data ?? []).map((r) => (
+                  <MenuItem key={r.id} value={r.id}>
+                    {r.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {swapMutation.isError ? <Alert severity="error">Failed to swap meal.</Alert> : null}
           </Stack>
         </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSwapOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={!swapMeal || !swapRecipeId || swapMutation.isPending}
+            onClick={async () => {
+              if (!swapMeal) return;
+              const payload: SwapWeeklyPlanMealRequest = {
+                date: swapMeal.date,
+                meal_type: swapMeal.meal.meal_type,
+                new_recipe_id: swapRecipeId,
+                lock: true,
+              };
+              await swapMutation.mutateAsync(payload);
+              setSwapOpen(false);
+            }}
+          >
+            Save
+          </Button>
+        </DialogActions>
       </Dialog>
     </Container>
   );

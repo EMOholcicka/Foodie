@@ -23,6 +23,7 @@ services:
     build:
       context: ./apps/api
       target: prod
+    command: ["gunicorn", "-c", "app.core.gunicorn_conf", "app.main:app"]
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://foodie:foodie@db:5432/foodie}

@@ -14,7 +14,10 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "20260217_0900"
-down_revision = "20260217_0800_user_targets_null_effective_date_unique"
+# Alembic expects `down_revision` to reference the *revision id* of the previous migration.
+# The file 20260217_0800_user_targets_null_effective_date_unique.py declares revision id "20260217_0800".
+# Using the filename here breaks revision graph resolution.
+down_revision = "20260217_0800"
 branch_labels = None
 depends_on = None
 

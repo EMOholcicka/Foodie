@@ -1,26 +1,54 @@
-import { Alert, Button, Card, CardContent, Container, LinearProgress, Skeleton, Stack, Typography } from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Container,
+  Fab,
+  LinearProgress,
+  Skeleton,
+  Stack,
+  Typography,
+} from "@mui/material";
 import dayjs from "dayjs";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
-import { dayQueryKeys, getDay } from "../api/daysApi";
+import { dayQueryKeys, getDay, type MealType } from "../api/daysApi";
 import { RemainingTargetsCard } from "../../targets/components/RemainingTargetsCard";
+
+const MEAL_ORDER: MealType[] = ["breakfast", "lunch", "dinner", "snack"];
+
+function defaultMealByTime(now: dayjs.Dayjs): MealType {
+  const h = now.hour();
+  if (h < 11) return "breakfast";
+  if (h < 15) return "lunch";
+  if (h < 20) return "dinner";
+  return "snack";
+}
 
 export function TodayRoute() {
   const navigate = useNavigate();
-  const today = dayjs().format("YYYY-MM-DD");
+  const now = dayjs();
+  const today = now.format("YYYY-MM-DD");
   const dayQuery = useQuery({
     queryKey: dayQueryKeys.byDate(today),
     queryFn: () => getDay(today),
   });
 
   const totals = dayQuery.data?.totals;
-  const meals = dayQuery.data?.meals ?? [];
+  const meals = (dayQuery.data?.meals ?? []).slice().sort((a, b) => MEAL_ORDER.indexOf(a.meal_type) - MEAL_ORDER.indexOf(b.meal_type));
+
+  const defaultMeal = defaultMealByTime(now);
 
   return (
-    <Container maxWidth="md" sx={{ py: 2 }}>
+    <Container maxWidth="md" sx={{ py: 2, pb: 10 }}>
       <Stack spacing={2}>
-        <Typography variant="h5">Today</Typography>
+        <Typography variant="h5" component="h1">
+          Today
+        </Typography>
 
         {dayQuery.isError ? (
           <Alert
@@ -65,23 +93,57 @@ export function TodayRoute() {
 
             <Stack spacing={1} sx={{ mt: 1 }}>
               {meals.map((m) => (
-                <Stack key={m.meal_type} direction="row" justifyContent="space-between">
-                  <Typography sx={{ textTransform: "capitalize" }}>{m.meal_type}</Typography>
-                  <Typography color="text.secondary">{Math.round(m.totals.kcal)} kcal</Typography>
-                </Stack>
+                <Box
+                  key={m.meal_type}
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 1,
+                    border: (t) => `1px solid ${t.palette.divider}`,
+                    borderRadius: 2,
+                    px: 1,
+                    py: 0.75,
+                    bgcolor: "background.paper",
+                  }}
+                >
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography sx={{ textTransform: "capitalize" }} noWrap>
+                      {m.meal_type}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap>
+                      {Math.round(m.totals.kcal)} kcal
+                    </Typography>
+                  </Box>
+
+                  <Button
+                    size="small"
+                    variant="contained"
+                    onClick={() => navigate(`/day/${today}?meal=${encodeURIComponent(m.meal_type)}`)}
+                    aria-label={`Add to ${m.meal_type}`}
+                  >
+                    Add
+                  </Button>
+                </Box>
               ))}
             </Stack>
 
-            <Button sx={{ mt: 2 }} fullWidth variant="contained" onClick={() => navigate(`/day/${today}`)}>
+            <Button sx={{ mt: 2 }} fullWidth variant="outlined" onClick={() => navigate(`/day/${today}`)}>
               Open day
             </Button>
           </CardContent>
         </Card>
-
-        <Button variant="outlined" onClick={() => navigate(`/day/${today}`)}>
-          Add food
-        </Button>
       </Stack>
+
+      <Fab
+        color="primary"
+        variant="extended"
+        aria-label="Add food"
+        onClick={() => navigate(`/day/${today}?meal=${encodeURIComponent(defaultMeal)}`)}
+        sx={{ position: "fixed", right: 16, bottom: 88 }}
+      >
+        <AddIcon sx={{ mr: 1 }} /> Add food
+      </Fab>
     </Container>
   );
 }

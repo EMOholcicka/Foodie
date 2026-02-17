@@ -17,7 +17,7 @@ from app.models.food import Food
 from app.models.meal_entry import MealType
 from app.models.recipe import Recipe
 from app.models.weekly_plan import WeeklyPlan, WeeklyPlanDay, WeeklyPlanMeal
-from app.schemas.plans import GenerateWeeklyPlanRequest
+from app.schemas.plans import GenerateWeeklyPlanRequest, SwapWeeklyPlanMealRequest
 
 
 _MEAL_SLOTS: tuple[MealType, ...] = (
@@ -219,6 +219,53 @@ async def generate_weekly_plan_for_user(
     await session.flush()
 
     # Ensure relationships are loaded for the response without doing an extra query.
+    await session.refresh(plan)
+    await session.refresh(plan, attribute_names=["days"])
+    for d in plan.days:
+        await session.refresh(d, attribute_names=["meals"])
+
+    return plan
+
+
+async def swap_weekly_plan_meal_for_user(
+    *,
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    week_start: date,
+    payload: SwapWeeklyPlanMealRequest,
+) -> WeeklyPlan:
+    await _pg_advisory_xact_lock(session=session, user_id=user_id, week_start=week_start)
+
+    if payload.date < week_start or payload.date > (week_start + timedelta(days=6)):
+        raise ValueError("date must be within the specified week")
+
+    recipe = await get_recipe_for_user(session=session, user_id=user_id, recipe_id=payload.new_recipe_id)
+    if recipe is None:
+        raise ValueError("Recipe not found")
+
+    plan_stmt = (
+        select(WeeklyPlan)
+        .where(WeeklyPlan.user_id == user_id, WeeklyPlan.week_start == week_start)
+        .options(selectinload(WeeklyPlan.days).selectinload(WeeklyPlanDay.meals))
+        .with_for_update()
+    )
+    plan_res = await session.execute(plan_stmt)
+    plan = plan_res.scalar_one_or_none()
+    if plan is None:
+        raise ValueError("Weekly plan not found")
+
+    day = next((d for d in plan.days if d.date == payload.date), None)
+    if day is None:
+        raise ValueError("Weekly plan day not found")
+
+    meal = next((m for m in day.meals if m.meal_type == payload.meal_type), None)
+    if meal is None:
+        raise ValueError("Weekly plan meal slot not found")
+
+    meal.recipe_id = recipe.id
+    meal.locked = bool(payload.lock)
+    await session.flush()
+
     await session.refresh(plan)
     await session.refresh(plan, attribute_names=["days"])
     for d in plan.days:

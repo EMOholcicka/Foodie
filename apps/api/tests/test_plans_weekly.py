@@ -317,3 +317,88 @@ def test_auth_isolation(client: TestClient) -> None:
 
     r = client.get(f"/plans/weekly/{week_start}/grocery-list", headers=_auth_headers(token_b))
     assert r.status_code == 404
+
+
+def test_swap_meal_updates_slot_and_locks_by_default(client: TestClient) -> None:
+    token = _register(client, "p_swap_default_lock@example.com")
+
+    f1 = _create_food(client, token, name="F1")
+    f2 = _create_food(client, token, name="F2")
+
+    r1 = _create_recipe(client, token, name="R1", servings=2)
+    _add_recipe_item(client, token, recipe_id=r1, food_id=f1, grams=100)
+
+    r2 = _create_recipe(client, token, name="R2", servings=2)
+    _add_recipe_item(client, token, recipe_id=r2, food_id=f2, grams=100)
+
+    week_start = "2026-02-16"
+    gen = client.post(
+        "/plans/weekly/generate",
+        headers=_auth_headers(token),
+        json={"week_start": week_start, "target_kcal": 2000},
+    )
+    assert gen.status_code == 201
+
+    swap = client.patch(
+        f"/plans/weekly/{week_start}/meals:swap",
+        headers=_auth_headers(token),
+        json={"date": "2026-02-16", "meal_type": "breakfast", "new_recipe_id": r2},
+    )
+    assert swap.status_code == 200
+    body = swap.json()
+
+    monday = next(d for d in body["days"] if d["date"] == "2026-02-16")
+    b = next(m for m in monday["meals"] if m["meal_type"] == "breakfast")
+    assert b["recipe_id"] == r2
+    assert b["locked"] is True
+
+
+def test_swap_rejects_date_outside_week(client: TestClient) -> None:
+    token = _register(client, "p_swap_outside_week@example.com")
+
+    f = _create_food(client, token, name="F")
+    r = _create_recipe(client, token, name="R", servings=2)
+    _add_recipe_item(client, token, recipe_id=r, food_id=f, grams=100)
+
+    week_start = "2026-02-16"
+    gen = client.post(
+        "/plans/weekly/generate",
+        headers=_auth_headers(token),
+        json={"week_start": week_start, "target_kcal": 2000},
+    )
+    assert gen.status_code == 201
+
+    swap = client.patch(
+        f"/plans/weekly/{week_start}/meals:swap",
+        headers=_auth_headers(token),
+        json={"date": "2026-02-25", "meal_type": "breakfast", "new_recipe_id": r},
+    )
+    assert swap.status_code == 422
+
+
+def test_swap_rejects_recipe_not_owned(client: TestClient) -> None:
+    token_a = _register(client, "p_swap_owner_a@example.com")
+    token_b = _register(client, "p_swap_owner_b@example.com")
+
+    fa = _create_food(client, token_a, name="FA")
+    ra = _create_recipe(client, token_a, name="RA", servings=2)
+    _add_recipe_item(client, token_a, recipe_id=ra, food_id=fa, grams=100)
+
+    fb = _create_food(client, token_b, name="FB")
+    rb = _create_recipe(client, token_b, name="RB", servings=2)
+    _add_recipe_item(client, token_b, recipe_id=rb, food_id=fb, grams=100)
+
+    week_start = "2026-02-16"
+    gen_a = client.post(
+        "/plans/weekly/generate",
+        headers=_auth_headers(token_a),
+        json={"week_start": week_start, "target_kcal": 2000},
+    )
+    assert gen_a.status_code == 201
+
+    swap = client.patch(
+        f"/plans/weekly/{week_start}/meals:swap",
+        headers=_auth_headers(token_a),
+        json={"date": "2026-02-16", "meal_type": "breakfast", "new_recipe_id": rb},
+    )
+    assert swap.status_code == 422

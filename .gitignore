@@ -46,6 +46,9 @@ ENV/
 .mypy_cache/
 .ruff_cache/
 
+# Local pytest auth sqlite db
+apps/api/.pytest_auth.db
+
 # Coverage
 .coverage
 .coverage.*

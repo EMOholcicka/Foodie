@@ -4,7 +4,9 @@ import {
   generateWeeklyPlan,
   getWeeklyGroceryList,
   getWeeklyPlan,
+  swapWeeklyPlanMeal,
   type GroceryListResponse,
+  type SwapWeeklyPlanMealRequest,
   type WeeklyPlan,
   type WeeklyPlanGenerateRequest,
 } from "./plansApi";
@@ -41,6 +43,18 @@ export function useGenerateWeeklyPlanMutation() {
     onSuccess: async (data: WeeklyPlan) => {
       // We already updated the weekly plan cache with setQueryData, so avoid a redundant
       // invalidate/refetch of the same query key. Only invalidate dependent queries.
+      qc.setQueryData(plansQueryKeys.weekly(data.week_start), data);
+      await qc.invalidateQueries({ queryKey: plansQueryKeys.groceryList(data.week_start) });
+    },
+  });
+}
+
+export function useSwapWeeklyPlanMealMutation(weekStart: string) {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: SwapWeeklyPlanMealRequest) => swapWeeklyPlanMeal(weekStart, payload),
+    onSuccess: async (data: WeeklyPlan) => {
       qc.setQueryData(plansQueryKeys.weekly(data.week_start), data);
       await qc.invalidateQueries({ queryKey: plansQueryKeys.groceryList(data.week_start) });
     },

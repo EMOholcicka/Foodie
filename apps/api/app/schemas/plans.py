@@ -95,6 +95,13 @@ class WeeklyPlanOut(BaseModel):
         from_attributes = True
 
 
+class SwapWeeklyPlanMealRequest(BaseModel):
+    date: date
+    meal_type: MealType
+    new_recipe_id: uuid.UUID
+    lock: bool = True
+
+
 class GroceryListBreakdownItem(BaseModel):
     recipe_id: uuid.UUID
     recipe_name: str | None = None

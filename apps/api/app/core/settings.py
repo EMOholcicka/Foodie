@@ -61,7 +61,17 @@ class Settings(BaseSettings):
         value = self.cors_origins
         if not value:
             return []
-        return [v.strip() for v in value.split(",") if v.strip()]
+
+        origins = [v.strip() for v in value.split(",") if v.strip()]
+
+        # Fail fast for the common (but invalid with credentials) star config.
+        if origins == ["*"]:
+            raise ValueError(
+                "Invalid CORS_ORIGINS: cannot be '*' when allow_credentials is enabled. "
+                "Set explicit origins (comma-separated), e.g. http://localhost:5173"
+            )
+
+        return origins
 
     def validate_security(self) -> None:
         """Fail fast on insecure auth configuration in non-dev environments."""

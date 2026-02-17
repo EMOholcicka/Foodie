@@ -73,7 +73,32 @@ async def run_migrations_online() -> None:
     await connectable.dispose()
 
 
+def _run_async(coro) -> None:
+    """Run an async coroutine from alembic env.
+
+    Alembic executes this file in-process.
+
+    This MUST be blocking: running migrations in the background (e.g. via
+    loop.create_task()) risks starting the API before schema is up-to-date.
+
+    If a loop is already running, we fail fast with a clear message instructing
+    the caller to run Alembic synchronously (e.g. as a pre-start step) instead.
+    """
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(coro)
+        return
+
+    raise RuntimeError(
+        "Alembic migrations cannot run under an already running event loop. "
+        "Run Alembic synchronously before starting the server (e.g. `alembic upgrade head`), "
+        "or disable AUTO_MIGRATE for in-process startup."
+    )
+
+
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    asyncio.run(run_migrations_online())
+    _run_async(run_migrations_online())
