@@ -1,0 +1,60 @@
+# --- OS / IDE ---
+.DS_Store
+
+# IntelliJ / JetBrains
+.idea/
+*.iml
+
+# VS Code (ignore local workspace settings; keep recommended extensions)
+.vscode/*
+!.vscode/extensions.json
+
+# --- Logs / runtime ---
+*.log
+
+# --- Node / React / Vite ---
+node_modules/
+dist/
+.vite/
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env files (keep example tracked)
+.env*
+!env.example
+
+# --- Python / FastAPI ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Docker / compose local state (do not ignore compose configs) ---
+# Local bind-mount volumes / state (common patterns)
+**/.docker/
+**/docker-data/
+
+# Buildx / local tooling caches
+**/.buildx-cache/

@@ -1,0 +1,4 @@
+Generic Alembic migrations.
+
+- `env.py` reads DATABASE_URL from environment.
+- `versions/` contains migration scripts.
