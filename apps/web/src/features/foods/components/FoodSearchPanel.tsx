@@ -21,7 +21,7 @@ import {
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { listFoods, type Food } from "../api/foodsApi";
+import { listFavoriteFoods, listFoods, listRecentFoods, type Food } from "../api/foodsApi";
 import { useDebouncedValue } from "../domain/useDebouncedValue";
 
 export type FoodSearchPanelProps = {
@@ -64,9 +64,13 @@ export function FoodSearchPanel(props: FoodSearchPanelProps) {
   const searchEnabled = tab === "search" && searchTerm.length >= 2;
 
   const foodsQuery = useQuery({
-    queryKey: ["foods", "search", searchTerm],
-    queryFn: () => listFoods({ query: searchTerm, limit: 30 }),
-    enabled: searchEnabled,
+    queryKey: ["foods", tab, tab === "search" ? searchTerm : ""],
+    queryFn: async () => {
+      if (tab === "search") return listFoods({ query: searchTerm, limit: 30 });
+      if (tab === "recent") return listRecentFoods({ limit: 30 });
+      return listFavoriteFoods({ limit: 50 });
+    },
+    enabled: tab !== "search" || searchEnabled,
     keepPreviousData: true,
   });
 
@@ -112,7 +116,7 @@ export function FoodSearchPanel(props: FoodSearchPanelProps) {
       />
 
       <Box>
-        {tab === "recent" ? (
+        {tab === "recent" && foodsQuery.isSuccess && items.length === 0 ? (
           <Stack spacing={1} sx={{ py: 1 }}>
             <Typography variant="body2" color="text.secondary">
               No recent foods yet.
@@ -123,13 +127,13 @@ export function FoodSearchPanel(props: FoodSearchPanelProps) {
           </Stack>
         ) : null}
 
-        {tab === "favorites" ? (
+        {tab === "favorites" && foodsQuery.isSuccess && items.length === 0 ? (
           <Stack spacing={1} sx={{ py: 1 }}>
             <Typography variant="body2" color="text.secondary">
               No favorites yet.
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Favorites will appear here after you star foods (coming soon).
+              Favorites will appear here after you star foods.
             </Typography>
           </Stack>
         ) : null}
@@ -147,7 +151,7 @@ export function FoodSearchPanel(props: FoodSearchPanelProps) {
           </Alert>
         ) : null}
 
-        {searchEnabled && foodsQuery.isLoading ? (
+        {(tab !== "search" || searchEnabled) && foodsQuery.isLoading ? (
           <Stack direction="row" alignItems="center" spacing={1}>
             <CircularProgress size={18} />
             <Typography variant="body2" color="text.secondary">

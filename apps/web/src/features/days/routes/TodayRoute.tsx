@@ -18,6 +18,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { dayQueryKeys, getDay, type MealType } from "../api/daysApi";
 import { RemainingTargetsCard } from "../../targets/components/RemainingTargetsCard";
+import { MealTypeIcon, TodayEmptyMealsIllustration } from "../../../shared/graphics";
 
 const MEAL_ORDER: MealType[] = ["breakfast", "lunch", "dinner", "snack"];
 
@@ -40,6 +41,11 @@ export function TodayRoute() {
 
   const totals = dayQuery.data?.totals;
   const meals = (dayQuery.data?.meals ?? []).slice().sort((a, b) => MEAL_ORDER.indexOf(a.meal_type) - MEAL_ORDER.indexOf(b.meal_type));
+
+  const mealsAllZero =
+    dayQuery.isSuccess &&
+    meals.length > 0 &&
+    meals.every((m) => Math.round(m.totals.kcal) === 0);
 
   const defaultMeal = defaultMealByTime(now);
 
@@ -85,10 +91,30 @@ export function TodayRoute() {
 
             {dayQuery.isLoading ? <LinearProgress sx={{ mt: 1 }} /> : null}
 
-            {dayQuery.isSuccess && meals.length === 0 ? (
-              <Alert severity="info" sx={{ mt: 1 }}>
-                No meals yet.
-              </Alert>
+            {dayQuery.isSuccess && (meals.length === 0 || mealsAllZero) ? (
+              <Box
+                sx={(t) => ({
+                  mt: 1,
+                  p: 1.25,
+                  borderRadius: 2,
+                  border: `1px solid ${t.palette.divider}`,
+                  bgcolor: "background.paper",
+                  display: "grid",
+                  gridTemplateColumns: { xs: "1fr", sm: "220px 1fr" },
+                  gap: 1.25,
+                  alignItems: "center",
+                })}
+              >
+                <Box aria-hidden sx={{ opacity: 0.95 }}>
+                  <TodayEmptyMealsIllustration className="foodie-illustration" />
+                </Box>
+                <Box>
+                  <Typography variant="subtitle2">Nothing logged yet</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                    Add your first meal to see calories and macros update here.
+                  </Typography>
+                </Box>
+              </Box>
             ) : null}
 
             <Stack spacing={1} sx={{ mt: 1 }}>
@@ -107,13 +133,31 @@ export function TodayRoute() {
                     bgcolor: "background.paper",
                   }}
                 >
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography sx={{ textTransform: "capitalize" }} noWrap>
-                      {m.meal_type}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" noWrap>
-                      {Math.round(m.totals.kcal)} kcal
-                    </Typography>
+                  <Box sx={{ minWidth: 0, display: "flex", alignItems: "center", gap: 1 }}>
+                    <Box
+                      aria-hidden
+                      sx={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 999,
+                        display: "grid",
+                        placeItems: "center",
+                        color: "rgba(255,255,255,0.92)",
+                        bgcolor: "rgba(255,255,255,0.04)",
+                        border: (t) => `1px solid ${t.palette.divider}`,
+                        flex: "0 0 auto",
+                      }}
+                    >
+                      <MealTypeIcon type={m.meal_type} className="foodie-meal-icon" />
+                    </Box>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography sx={{ textTransform: "capitalize" }} noWrap>
+                        {m.meal_type}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" noWrap>
+                        {Math.round(m.totals.kcal)} kcal
+                      </Typography>
+                    </Box>
                   </Box>
 
                   <Button

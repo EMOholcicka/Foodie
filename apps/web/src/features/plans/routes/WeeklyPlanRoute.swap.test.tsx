@@ -38,7 +38,7 @@ function renderRoute(initialEntry: string) {
   );
 }
 
-test("swap modal lists recipes and triggers swap mutation", async () => {
+test("change recipe dialog lists recipes and triggers swap mutation", async () => {
   const plansApi = await import("../api/plansApi");
   const recipesApi = await import("../../recipes/api/recipesApi");
 
@@ -48,50 +48,50 @@ test("swap modal lists recipes and triggers swap mutation", async () => {
   ]);
 
   const plan = {
+    id: "p1",
     week_start: "2026-02-16",
-    totals: { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+    target_kcal: 2000,
+    protein_g: null,
+    carbs_g: null,
+    fat_g: null,
     days: [
       {
+        id: "d1",
         date: "2026-02-16",
-        totals: { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
         meals: [
           {
             id: "m1",
             meal_type: "breakfast",
             recipe_id: "r1",
-            recipe_name: "Recipe 1",
-            totals: { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+            servings: 1,
             locked: false,
           },
           {
             id: "m2",
             meal_type: "lunch",
             recipe_id: "r1",
-            recipe_name: "Recipe 1",
-            totals: { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+            servings: 1,
             locked: false,
           },
           {
             id: "m3",
             meal_type: "dinner",
             recipe_id: "r1",
-            recipe_name: "Recipe 1",
-            totals: { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+            servings: 1,
             locked: false,
           },
           {
             id: "m4",
             meal_type: "snack",
             recipe_id: "r1",
-            recipe_name: "Recipe 1",
-            totals: { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+            servings: 1,
             locked: false,
           },
         ],
       },
       ...Array.from({ length: 6 }).map((_, i) => ({
+        id: `d${2 + i}`,
         date: `2026-02-${17 + i}`,
-        totals: { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
         meals: [],
       })),
     ],
@@ -119,13 +119,18 @@ test("swap modal lists recipes and triggers swap mutation", async () => {
   // Open Monday drawer
   fireEvent.click(await screen.findByLabelText("Open Monday"));
 
-  // Open swap modal
-  fireEvent.click(screen.getByLabelText("Swap breakfast"));
-  expect(screen.getByRole("dialog", { name: "Swap meal" })).toBeInTheDocument();
+  // Open change recipe dialog
+  fireEvent.click(screen.getByLabelText("Change recipe for breakfast"));
+  expect(screen.getByRole("dialog", { name: "Change recipe" })).toBeInTheDocument();
+
+  // Initial focus on search
+  await waitFor(() => {
+    expect(screen.getByRole("combobox", { name: "Recipe" })).toHaveFocus();
+  });
 
   // Pick recipe 2
-  const select = screen.getByTestId("swap-recipe-select");
-  fireEvent.mouseDown(within(select).getByRole("combobox"));
+  const combo = screen.getByRole("combobox", { name: "Recipe" });
+  fireEvent.mouseDown(combo);
   fireEvent.click(await screen.findByRole("option", { name: "Recipe 2" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -141,6 +146,6 @@ test("swap modal lists recipes and triggers swap mutation", async () => {
 
   // dialog closes
   await waitFor(() => {
-    expect(screen.queryByRole("dialog", { name: "Swap meal" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Change recipe" })).not.toBeInTheDocument();
   });
 });

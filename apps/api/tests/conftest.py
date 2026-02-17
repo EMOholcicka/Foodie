@@ -1,22 +1,27 @@
 from __future__ import annotations
 
 import os
-
-# IMPORTANT: settings are constructed at app import time in this project.
-# Set DATABASE_URL as early as possible so importing app.main doesn't crash.
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./.pytest_auth.db")
-
+import uuid
 from collections.abc import AsyncIterator, Iterator
+from datetime import date
 
 import pytest
 import sqlalchemy as sa
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
+# IMPORTANT: settings are constructed at app import time in this project.
+# Set DATABASE_URL as early as possible so importing app.main doesn't crash.
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./.pytest_auth.db")
+
 from app.core.settings import get_settings
 from app.db.session import get_db_session
 from app.main import create_app
 from app.models.base import Base
+from app.models.day import Day
+from app.models.food import Food
+from app.models.meal_entry import MealEntry
+from app.models.user import User
 
 
 
@@ -256,3 +261,68 @@ def client(session: AsyncSession) -> Iterator[TestClient]:
 
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture()
+def auth_headers(client: TestClient) -> dict[str, str]:
+    r = client.post(
+        "/auth/register",
+        json={"email": f"u-{uuid.uuid4()}@example.com", "password": "password123"},
+    )
+    assert r.status_code == 201
+    access = r.json()["access_token"]
+    return {"Authorization": f"Bearer {access}"}
+
+
+@pytest.fixture()
+async def make_food_for_user(session: AsyncSession, user_id_for_auth: uuid.UUID):
+    async def _make(*, name: str = "Food", brand: str | None = None):
+        food = Food(
+            user_id=user_id_for_auth,
+            name=name,
+            brand=brand,
+            kcal_100g=100,
+            protein_100g=10,
+            carbs_100g=10,
+            fat_100g=10,
+        )
+        session.add(food)
+        await session.flush()
+        return {"id": str(food.id), "user_id": str(food.user_id), "name": food.name}
+
+    return _make
+
+
+@pytest.fixture()
+async def user_id_for_auth(session: AsyncSession, auth_headers: dict[str, str]) -> uuid.UUID:
+    # We can't decode user_id from JWT easily in tests; instead select last created user.
+    res = await session.execute(sa.select(User).order_by(User.created_at.desc()).limit(1))
+    user = res.scalar_one()
+    return user.id
+
+
+@pytest.fixture()
+async def make_day(session: AsyncSession, user_id_for_auth: uuid.UUID):
+    async def _make(*, day_date: str = "2026-02-17"):
+        d = Day(user_id=user_id_for_auth, date=date.fromisoformat(day_date))
+        session.add(d)
+        await session.flush()
+        return {"id": str(d.id), "user_id": str(d.user_id), "date": d.date.isoformat()}
+
+    return _make
+
+
+@pytest.fixture()
+async def make_meal_entry(session: AsyncSession):
+    async def _make(*, day_id: str, meal_type: str, food_id: str, grams: float = 100):
+        me = MealEntry(
+            day_id=uuid.UUID(day_id),
+            meal_type=meal_type,
+            food_id=uuid.UUID(food_id),
+            grams=grams,
+        )
+        session.add(me)
+        await session.flush()
+        return {"id": str(me.id)}
+
+    return _make

@@ -56,6 +56,7 @@ vi.mock("../../foods/api/foodsApi", () => {
       {
         id: "food-1",
         owner: "global",
+        is_favorite: false,
         name: "Banana",
         brand: null,
         kcal_100g: 89,
@@ -64,6 +65,10 @@ vi.mock("../../foods/api/foodsApi", () => {
         fat_100g: 0.3,
       },
     ]),
+    listRecentFoods: vi.fn(async () => []),
+    listFavoriteFoods: vi.fn(async () => []),
+    favoriteFood: vi.fn(async () => {}),
+    unfavoriteFood: vi.fn(async () => {}),
     createFood: vi.fn(),
   };
 });
@@ -245,6 +250,24 @@ describe("DayRoute", () => {
       await waitFor(() => {
         expect(listFoods).toHaveBeenCalledTimes(0);
       });
+    });
+
+    it("allows toggling favorite in the food detail drawer", async () => {
+      const foodsApi = await import("../../foods/api/foodsApi");
+      const user = userEvent.setup();
+
+      currentSearch = "";
+      renderRoute();
+
+      await user.click(await screen.findByRole("button", { name: /add food/i }));
+      await user.type(screen.getByRole("textbox", { name: /search/i }), "Ba");
+      await user.click(await screen.findByText("Banana"));
+
+      await user.click(await screen.findByRole("button", { name: /favorite food/i }));
+      expect(foodsApi.favoriteFood).toHaveBeenCalledWith("food-1");
+
+      await user.click(await screen.findByRole("button", { name: /unfavorite food/i }));
+      expect(foodsApi.unfavoriteFood).toHaveBeenCalledWith("food-1");
     });
 
     it("mutation error keeps UI open and shows error", async () => {

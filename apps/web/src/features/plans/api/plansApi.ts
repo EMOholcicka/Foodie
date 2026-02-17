@@ -2,34 +2,47 @@ import { http } from "../../../shared/api/http";
 
 export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
-export type MacroTotals = {
-  kcal: number;
-  protein_g: number;
-  carbs_g: number;
-  fat_g: number;
-};
+// NOTE: weekly plan API currently returns only IDs + lock/servings.
+// Display names are resolved client-side from the recipes cache/query.
 
 export type WeeklyPlanMeal = {
   id: string;
   meal_type: MealType;
-  recipe_id: string | null;
-  recipe_name: string | null;
-  totals: MacroTotals;
+  recipe_id: string;
+  servings: number;
   locked: boolean;
 };
 
 export type WeeklyPlanDay = {
+  id: string;
   date: string; // YYYY-MM-DD
-  totals: MacroTotals;
   meals: WeeklyPlanMeal[];
+
+  // Optional; backend may add this later.
+  totals?: {
+    kcal: number;
+    protein_g: number;
+    carbs_g: number;
+    fat_g: number;
+  } | null;
+};
+
+export type WeeklyPlanGenerationSummary = {
+  locked_kept: number;
+  locked_changed: number;
+  unlocked_changed: number;
 };
 
 export type WeeklyPlan = {
+  id: string;
   week_start: string; // YYYY-MM-DD (Mon)
+  target_kcal: number;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
   days: WeeklyPlanDay[];
-  totals: MacroTotals;
-  created_at?: string;
-  updated_at?: string;
+
+  generation_summary?: WeeklyPlanGenerationSummary | null;
 };
 
 export type WeeklyPlanGenerateRequest = {
@@ -54,13 +67,19 @@ export type WeeklyPlanGenerateRequest = {
 
 export type WeeklyPlanGenerateResponse = WeeklyPlan;
 
+// Grocery list endpoint returns `item_key`, `food_id`, `food_name`, `total_grams`, `checked`, `per_recipe`.
 export type GroceryListItem = {
-  id: string;
-  name: string;
-  grams: number;
-  category: string | null;
-  recipe_id: string | null;
-  recipe_name: string | null;
+  item_key: string;
+  food_id: string;
+  food_name: string | null;
+  total_grams: number;
+  checked: boolean;
+  per_recipe: Array<{
+    recipe_id: string;
+    recipe_name: string | null;
+    servings: number;
+    grams: number;
+  }>;
 };
 
 export type GroceryListResponse = {
@@ -85,6 +104,13 @@ export async function swapWeeklyPlanMeal(weekStart: string, payload: SwapWeeklyP
   return data;
 }
 
+export async function setWeeklyPlanMealLock(weekStart: string, mealId: string, locked: boolean): Promise<WeeklyPlan> {
+  const { data } = await http.patch<WeeklyPlan>(`/plans/weekly/${weekStart}/meals/${mealId}`, undefined, {
+    params: { locked },
+  });
+  return data;
+}
+
 export async function getWeeklyPlan(weekStart: string): Promise<WeeklyPlan> {
   const { data } = await http.get<WeeklyPlan>(`/plans/weekly/${weekStart}`);
   return data;
@@ -93,4 +119,12 @@ export async function getWeeklyPlan(weekStart: string): Promise<WeeklyPlan> {
 export async function getWeeklyGroceryList(weekStart: string): Promise<GroceryListResponse> {
   const { data } = await http.get<GroceryListResponse>(`/plans/weekly/${weekStart}/grocery-list`);
   return data;
+}
+
+export type GroceryChecksBulkUpdateRequest = {
+  items: Array<{ item_key: string; checked: boolean }>;
+};
+
+export async function bulkUpdateGroceryChecks(weekStart: string, payload: GroceryChecksBulkUpdateRequest): Promise<void> {
+  await http.put(`/plans/weekly/${weekStart}/grocery-list/checks`, payload);
 }

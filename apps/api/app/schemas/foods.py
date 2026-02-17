@@ -91,12 +91,14 @@ class FoodUpdate(BaseModel):
 class FoodOut(FoodBase):
     id: str
     owner: str  # 'global' | 'user'
+    is_favorite: bool = False
 
     @classmethod
-    def from_model(cls, food) -> "FoodOut":
+    def from_model(cls, food, *, is_favorite: bool = False) -> "FoodOut":
         return cls(
             id=str(food.id),
             owner=("global" if food.user_id is None else "user"),
+            is_favorite=is_favorite,
             name=food.name,
             brand=food.brand,
             kcal_100g=float(food.kcal_100g),

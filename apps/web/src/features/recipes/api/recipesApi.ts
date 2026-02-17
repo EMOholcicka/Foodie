@@ -20,6 +20,8 @@ export type Recipe = {
   user_id: string;
   name: string;
   servings: number;
+  tags: string[];
+  is_favorite: boolean;
   created_at: string;
   updated_at: string;
   items: RecipeItem[];
@@ -46,12 +48,34 @@ export type RecipeItemUpdateRequest = {
   grams: number;
 };
 
-export async function listRecipes(): Promise<Recipe[]> {
+export type RecipesListParams = {
+  tags?: string[];
+  high_protein?: boolean;
+  favorites_only?: boolean;
+};
+
+export async function listRecipes(params: RecipesListParams = {}): Promise<Recipe[]> {
   // API may return either a bare array (legacy) OR a wrapped list response.
   // In Docker/dev this was observed to be `{ items: Recipe[] }`, which caused
   // `filtered.map is not a function` in the list route.
-  const { data } = await http.get<Recipe[] | { items: Recipe[] }>("/recipes");
+  const { data } = await http.get<Recipe[] | { items: Recipe[] }>("/recipes", {
+    params: {
+      ...(params.high_protein ? { high_protein: true } : {}),
+      ...(params.favorites_only ? { favorites_only: true } : {}),
+      ...(params.tags?.length ? { tags: params.tags } : {}),
+    },
+    // allow repeated querystring keys for arrays
+    paramsSerializer: { indexes: null as any },
+  });
   return Array.isArray(data) ? data : data.items;
+}
+
+export async function favoriteRecipe(recipeId: string): Promise<void> {
+  await http.post(`/recipes/${recipeId}/favorite`);
+}
+
+export async function unfavoriteRecipe(recipeId: string): Promise<void> {
+  await http.delete(`/recipes/${recipeId}/favorite`);
 }
 
 export async function getRecipe(recipeId: string): Promise<Recipe> {

@@ -36,8 +36,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   groceryListToClipboardText,
   groceryListToCsv,
-  loadGroceryCheckedMap,
-  storeGroceryCheckedMap,
+  useBulkUpdateGroceryChecksMutation,
   useWeeklyGroceryListQuery,
 } from "../api/plansQueries";
 import { fmtDate, getWeekStartFromUrlOrStorage, persistLastWeekStart, weekLabel } from "../domain/week";
@@ -48,7 +47,12 @@ type GroupMode = "category" | "recipe";
 type PlanTab = "plan" | "grocery";
 
 function groupLabel(it: GroceryListItem, mode: GroupMode) {
-  return mode === "recipe" ? it.recipe_name ?? "Other" : it.category ?? "Other";
+  if (mode === "category") return "Grocery";
+  // API provides per_recipe; if there is exactly one recipe contributor,
+  // we can label the group by that recipe. Otherwise group into a stable bucket.
+  if (it.per_recipe.length === 1) return it.per_recipe[0]?.recipe_name ?? "Other";
+  if (it.per_recipe.length > 1) return "Multiple recipes";
+  return "Other";
 }
 
 function PlanSubNav({ tab, weekStart }: { tab: PlanTab; weekStart: string }) {
@@ -109,6 +113,8 @@ export function GroceryListRoute() {
   const [printView, setPrintView] = useState(false);
   const printRequestedRef = useRef(false);
 
+  const bulkUpdate = useBulkUpdateGroceryChecksMutation(weekStart);
+
   const [snack, setSnack] = useState<{ open: boolean; msg: string; severity: "success" | "error" }>({
     open: false,
     msg: "",
@@ -116,12 +122,23 @@ export function GroceryListRoute() {
   });
 
   useEffect(() => {
-    setChecked(loadGroceryCheckedMap(weekStart));
-  }, [weekStart]);
+    // Initialize from server state for this week.
+    const items = q.data?.items ?? [];
+    const next: Record<string, boolean> = {};
+    for (const it of items) next[it.item_key] = Boolean(it.checked);
+    setChecked(next);
+  }, [weekStart, q.data?.items]);
 
   useEffect(() => {
-    storeGroceryCheckedMap(weekStart, checked);
-  }, [checked, weekStart]);
+    // Persist to backend (debounced) for this week.
+    if (!q.data) return;
+    const t = window.setTimeout(() => {
+      void bulkUpdate.mutateAsync(
+        Object.entries(checked).map(([item_key, v]) => ({ item_key, checked: Boolean(v) }))
+      );
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [checked, weekStart, q.data, bulkUpdate]);
 
   const grouped = useMemo(() => {
     const items = q.data?.items ?? [];
@@ -133,7 +150,12 @@ export function GroceryListRoute() {
 
     return Array.from(map.entries())
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, arr]) => [k, arr.slice().sort((a, b) => a.name.localeCompare(b.name))] as const);
+      .map(([k, arr]) =>
+        [
+          k,
+          arr.slice().sort((a, b) => (a.food_name ?? a.item_key).localeCompare(b.food_name ?? b.item_key)),
+        ] as const
+      );
   }, [q.data?.items, mode]);
 
   const totalItems = q.data?.items?.length ?? 0;
@@ -363,12 +385,13 @@ export function GroceryListRoute() {
 
                 <List disablePadding>
                   {items.map((it) => {
-                    const isChecked = checked[it.id] ?? false;
-                    const toggle = () => setChecked((p) => ({ ...p, [it.id]: !(p[it.id] ?? false) }));
+                    const isChecked = checked[it.item_key] ?? false;
+                    const toggle = () => setChecked((p) => ({ ...p, [it.item_key]: !(p[it.item_key] ?? false) }));
+                    const displayName = it.food_name ?? it.item_key;
 
                     return (
                       <ListItem
-                        key={it.id}
+                        key={it.item_key}
                         disablePadding
                         sx={{
                           borderTop: (t) => `1px solid ${t.palette.divider}`,
@@ -393,13 +416,15 @@ export function GroceryListRoute() {
                             tabIndex={-1}
                             checked={isChecked}
                             onChange={toggle}
-                            inputProps={{ "aria-label": isChecked ? `Uncheck ${it.name}` : `Check ${it.name}` }}
+                            inputProps={{
+                              "aria-label": isChecked ? `Uncheck ${displayName}` : `Check ${displayName}`,
+                            }}
                           />
 
                           <ListItemText
                             primary={
-                              <Typography variant="body2" noWrap title={it.name}>
-                                {it.name}
+                              <Typography variant="body2" noWrap title={displayName}>
+                                {displayName}
                               </Typography>
                             }
                             sx={{ my: 0, minWidth: 0 }}
@@ -422,7 +447,7 @@ export function GroceryListRoute() {
                                 fontVariantNumeric: "tabular-nums",
                               }}
                             >
-                              {Math.round(it.grams)} g
+                              {Math.round(it.total_grams)} g
                             </Typography>
                           </Box>
                         </ListItemButton>

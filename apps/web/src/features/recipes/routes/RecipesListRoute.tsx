@@ -1,15 +1,24 @@
 import AddIcon from "@mui/icons-material/Add";
+import PushPinIcon from "@mui/icons-material/PushPin";
+import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import {
   Alert,
   Box,
   Button,
+  Chip,
   CircularProgress,
   Container,
+  FormControl,
+  IconButton,
   InputAdornment,
+  InputLabel,
   List,
+  ListItem,
   ListItemButton,
   ListItemText,
+  MenuItem,
+  Select,
   Stack,
   TextField,
   Typography,
@@ -17,7 +26,7 @@ import {
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { useRecipesListQuery } from "../api/recipesQueries";
+import { useRecipesListQuery, useToggleRecipeFavoriteMutation } from "../api/recipesQueries";
 
 function formatMacrosLine(kcal: number, p: number, c: number, f: number) {
   const kcalRounded = Math.round(kcal);
@@ -30,12 +39,18 @@ function formatMacrosLine(kcal: number, p: number, c: number, f: number) {
 export function RecipesListRoute() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
+  const [highProtein, setHighProtein] = useState(false);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [tagFilter, setTagFilter] = useState<string | "">("");
 
-  const recipesQuery = useRecipesListQuery();
+  const recipesQuery = useRecipesListQuery({
+    high_protein: highProtein,
+    favorites_only: favoritesOnly,
+    tags: tagFilter ? [tagFilter] : undefined,
+  });
 
   const filtered = useMemo(() => {
-    // Defensive: in some environments the query data can be a wrapped object
-    // (e.g. `{ items: [...] }`) due to API response shape mismatch.
+    // Keep client-side search only; other filters are server-side.
     const raw: any = recipesQuery.data;
     const items = Array.isArray(raw) ? raw : (raw?.items ?? []);
 
@@ -43,6 +58,16 @@ export function RecipesListRoute() {
     if (!q) return items;
     return items.filter((r: any) => String(r.name ?? "").toLowerCase().includes(q));
   }, [query, recipesQuery.data]);
+
+  const allTags = useMemo(() => {
+    const raw: any = recipesQuery.data;
+    const items = Array.isArray(raw) ? raw : (raw?.items ?? []);
+    const s = new Set<string>();
+    for (const r of items) {
+      for (const t of r.tags ?? []) s.add(String(t));
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [recipesQuery.data]);
 
   const showEmptyState =
     recipesQuery.isSuccess &&
@@ -63,19 +88,61 @@ export function RecipesListRoute() {
           </Button>
         </Stack>
 
-        <TextField
-          label="Search recipes"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          inputProps={{ "aria-label": "Search recipes" }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" />
-              </InputAdornment>
-            ),
-          }}
-        />
+        <Stack spacing={1}>
+          <TextField
+            label="Search recipes"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            inputProps={{ "aria-label": "Search recipes" }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            }}
+          />
+
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" aria-label="Recipe filters">
+            <Chip
+              label="High protein"
+              color={highProtein ? "primary" : "default"}
+              variant={highProtein ? "filled" : "outlined"}
+              clickable
+              onClick={() => setHighProtein((v) => !v)}
+              aria-pressed={highProtein}
+            />
+            <Chip
+              label="Favorites"
+              color={favoritesOnly ? "primary" : "default"}
+              variant={favoritesOnly ? "filled" : "outlined"}
+              clickable
+              onClick={() => setFavoritesOnly((v) => !v)}
+              aria-pressed={favoritesOnly}
+            />
+
+            <FormControl size="small" sx={{ minWidth: 160 }}>
+              <InputLabel id="recipe-tag-filter-label">Tag</InputLabel>
+              <Select
+                labelId="recipe-tag-filter-label"
+                label="Tag"
+                value={tagFilter}
+                onChange={(e) => setTagFilter(String(e.target.value))}
+                displayEmpty
+                inputProps={{ "aria-label": "Filter by tag" }}
+              >
+                <MenuItem value="">
+                  <em>All tags</em>
+                </MenuItem>
+                {allTags.map((t) => (
+                  <MenuItem key={t} value={t}>
+                    {t}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Stack>
+        </Stack>
 
         <Box>
           {recipesQuery.isError ? (
@@ -115,27 +182,58 @@ export function RecipesListRoute() {
           {!showEmptyState && recipesQuery.isSuccess ? (
             <List disablePadding>
               {filtered.map((r) => (
-                <ListItemButton key={r.id} onClick={() => navigate(`/recipes/${r.id}`)}>
-                  <ListItemText
-                    primary={r.name}
-                    secondary={
-                      <span>
-                        {`${r.servings} servings • `}
-                        {formatMacrosLine(
-                          r.macros_per_serving.kcal,
-                          r.macros_per_serving.protein,
-                          r.macros_per_serving.carbs,
-                          r.macros_per_serving.fat,
-                        )}
-                      </span>
-                    }
-                  />
-                </ListItemButton>
+                <RecipeRow
+                  key={r.id}
+                  recipe={r}
+                  onOpen={() => navigate(`/recipes/${r.id}`)}
+                />
               ))}
             </List>
           ) : null}
         </Box>
       </Stack>
     </Container>
+  );
+}
+
+function RecipeRow({ recipe, onOpen }: { recipe: any; onOpen: () => void }) {
+  const toggleFav = useToggleRecipeFavoriteMutation(recipe.id);
+
+  return (
+    <ListItem
+      disablePadding
+      secondaryAction={
+        <IconButton
+          edge="end"
+          aria-label={recipe.is_favorite ? "Unpin recipe" : "Pin recipe"}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleFav.mutate(Boolean(recipe.is_favorite));
+          }}
+          disabled={toggleFav.isPending}
+        >
+          {recipe.is_favorite ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
+        </IconButton>
+      }
+    >
+      <ListItemButton onClick={onOpen}>
+        <ListItemText
+          primary={recipe.name}
+          secondary={
+            <span>
+              {`${recipe.servings} servings • `}
+              {formatMacrosLine(
+                recipe.macros_per_serving.kcal,
+                recipe.macros_per_serving.protein,
+                recipe.macros_per_serving.carbs,
+                recipe.macros_per_serving.fat,
+              )}
+              {recipe.tags?.length ? ` • ${recipe.tags.join(", ")}` : ""}
+            </span>
+          }
+        />
+      </ListItemButton>
+    </ListItem>
   );
 }

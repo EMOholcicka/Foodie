@@ -1,20 +1,11 @@
 import CloseIcon from "@mui/icons-material/Close";
-import {
-  Box,
-  Button,
-  Divider,
-  Drawer,
-  IconButton,
-  InputAdornment,
-  Stack,
-  TextField,
-  ToggleButton,
-  ToggleButtonGroup,
-  Typography,
-} from "@mui/material";
+import StarBorderIcon from "@mui/icons-material/StarBorder";
+import StarIcon from "@mui/icons-material/Star";
+import { Alert, Box, Button, Divider, Drawer, IconButton, InputAdornment, Snackbar, Stack, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
-import type { Food } from "../api/foodsApi";
+import { favoriteFood, unfavoriteFood, type Food } from "../api/foodsApi";
 
 export type FoodDetailDrawerProps = {
   open: boolean;
@@ -23,6 +14,7 @@ export type FoodDetailDrawerProps = {
   onClose: () => void;
   onAdd: (args: { foodId: string; grams: number; mealType: FoodDetailDrawerProps["mealType"] }) => void;
   pending?: boolean;
+  onFavoriteChanged?: (args: { foodId: string; isFavorite: boolean }) => void;
 };
 
 function clampPositiveNumber(v: number): number {
@@ -37,13 +29,24 @@ function parseGramsInput(text: string): number {
 }
 
 export function FoodDetailDrawer(props: FoodDetailDrawerProps) {
+  const qc = useQueryClient();
+
   const [gramsText, setGramsText] = useState<string>("100");
+  const [favoritePending, setFavoritePending] = useState(false);
+  const [favoriteLocal, setFavoriteLocal] = useState<boolean | null>(null);
+
+  const [favoriteErrorOpen, setFavoriteErrorOpen] = useState(false);
+  const [favoriteErrorMsg, setFavoriteErrorMsg] = useState<string>("Failed to update favorite. Please try again.");
+
+  const isFavorite = favoriteLocal ?? props.food?.is_favorite ?? false;
 
   useEffect(() => {
     // Reset portion when opening or when switching foods while open,
     // so we don't carry stale grams/validation across foods.
     if (!props.open) return;
     setGramsText("100");
+    setFavoriteLocal(null);
+    setFavoritePending(false);
   }, [props.open, props.food?.id]);
 
   const grams = useMemo(() => parseGramsInput(gramsText), [gramsText]);
@@ -92,9 +95,54 @@ export function FoodDetailDrawer(props: FoodDetailDrawerProps) {
               {props.food?.brand ?? (props.food ? "No brand" : "")}
             </Typography>
           </Box>
-          <IconButton onClick={props.onClose} aria-label="Close" disabled={pending}>
-            <CloseIcon />
-          </IconButton>
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <Tooltip title={isFavorite ? "Unfavorite" : "Favorite"}>
+              <span>
+                <IconButton
+                  aria-label={isFavorite ? "Unfavorite food" : "Favorite food"}
+                  disabled={!props.food || pending || favoritePending}
+                  onClick={async () => {
+                    if (!props.food) return;
+
+                    const prev = isFavorite;
+                    const next = !prev;
+
+                    setFavoriteErrorOpen(false);
+
+                    try {
+                      setFavoritePending(true);
+                      setFavoriteLocal(next);
+
+                      if (next) await favoriteFood(props.food.id);
+                      else await unfavoriteFood(props.food.id);
+
+                      // Invalidate all lists that can show favorite state.
+                      await Promise.all([
+                        qc.invalidateQueries({ queryKey: ["foods"] }),
+                        qc.invalidateQueries({ queryKey: ["foods", "recent"] }),
+                        qc.invalidateQueries({ queryKey: ["foods", "favorites"] }),
+                      ]);
+
+                      props.onFavoriteChanged?.({ foodId: props.food.id, isFavorite: next });
+                    } catch {
+                      // Revert optimistic UI on error and show feedback.
+                      setFavoriteLocal(prev);
+                      setFavoriteErrorMsg(`Failed to ${next ? "favorite" : "unfavorite"} ${props.food.name}. Please try again.`);
+                      setFavoriteErrorOpen(true);
+                    } finally {
+                      setFavoritePending(false);
+                    }
+                  }}
+                >
+                  {isFavorite ? <StarIcon /> : <StarBorderIcon />}
+                </IconButton>
+              </span>
+            </Tooltip>
+
+            <IconButton onClick={props.onClose} aria-label="Close" disabled={pending}>
+              <CloseIcon />
+            </IconButton>
+          </Stack>
         </Stack>
 
         <Divider sx={{ my: 2 }} />
@@ -160,6 +208,17 @@ export function FoodDetailDrawer(props: FoodDetailDrawerProps) {
         >
           Add to {props.mealType}
         </Button>
+
+        <Snackbar
+          open={favoriteErrorOpen}
+          autoHideDuration={4000}
+          onClose={() => setFavoriteErrorOpen(false)}
+          anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        >
+          <Alert severity="error" onClose={() => setFavoriteErrorOpen(false)}>
+            {favoriteErrorMsg}
+          </Alert>
+        </Snackbar>
       </Box>
     </Drawer>
   );

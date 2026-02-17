@@ -39,6 +39,7 @@ class RecipeItemOut(RecipeItemBase):
 class RecipeBase(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     servings: int = Field(gt=0)
+    tags: list[str] = Field(default_factory=list, max_length=30)
 
 
 class RecipeCreate(RecipeBase):
@@ -48,6 +49,7 @@ class RecipeCreate(RecipeBase):
 class RecipeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     servings: int | None = Field(default=None, gt=0)
+    tags: list[str] | None = Field(default=None, max_length=30)
 
 
 class RecipeOut(RecipeBase):
@@ -60,6 +62,8 @@ class RecipeOut(RecipeBase):
 
     total_macros: Macros
     macros_per_serving: Macros
+
+    is_favorite: bool = False
 
     class Config:
         from_attributes = True

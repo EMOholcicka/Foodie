@@ -18,6 +18,16 @@ def _register(client: TestClient, email: str) -> str:
     return resp.json()["access_token"]
 
 
+def _create_recipe(client: TestClient, token: str, *, name: str, servings: int, tags: list[str] | None = None) -> str:
+    resp = client.post(
+        "/recipes",
+        headers=_auth_headers(token),
+        json={"name": name, "servings": servings, "tags": (tags or [])},
+    )
+    assert resp.status_code == 201
+    return resp.json()["id"]
+
+
 def _create_food(
     client: TestClient,
     token: str,
@@ -165,9 +175,7 @@ def test_create_recipe_add_items_and_compute_nutrition(client: TestClient) -> No
     food1_id = _create_food(client, token, name="F1", kcal_100g=100, protein_100g=10, carbs_100g=0, fat_100g=0)
     food2_id = _create_food(client, token, name="F2", kcal_100g=200, protein_100g=0, carbs_100g=20, fat_100g=0)
 
-    r = client.post("/recipes", headers=_auth_headers(token), json={"name": "My recipe", "servings": 2})
-    assert r.status_code == 201
-    recipe_id = r.json()["id"]
+    recipe_id = _create_recipe(client, token, name="My recipe", servings=2, tags=["Dinner", "High protein"])
 
     r = client.post(
         f"/recipes/{recipe_id}/items",
@@ -202,9 +210,7 @@ def test_update_servings_recomputes(client: TestClient) -> None:
     token = _register(client, "r2@example.com")
     food_id = _create_food(client, token, name="F", kcal_100g=100, protein_100g=0, carbs_100g=0, fat_100g=0)
 
-    r = client.post("/recipes", headers=_auth_headers(token), json={"name": "R", "servings": 2})
-    assert r.status_code == 201
-    recipe_id = r.json()["id"]
+    recipe_id = _create_recipe(client, token, name="R", servings=2, tags=["One"])
 
     r = client.post(
         f"/recipes/{recipe_id}/items",
@@ -227,8 +233,7 @@ def test_user_isolation(client: TestClient) -> None:
 
     food_id = _create_food(client, token_a, name="F", kcal_100g=100, protein_100g=0, carbs_100g=0, fat_100g=0)
 
-    r = client.post("/recipes", headers=_auth_headers(token_a), json={"name": "R", "servings": 1})
-    recipe_id = r.json()["id"]
+    recipe_id = _create_recipe(client, token_a, name="R", servings=1)
 
     client.post(
         f"/recipes/{recipe_id}/items",
@@ -247,8 +252,7 @@ def test_delete_cascade_items(client: TestClient) -> None:
     token = _register(client, "r3@example.com")
     food_id = _create_food(client, token, name="F", kcal_100g=100, protein_100g=0, carbs_100g=0, fat_100g=0)
 
-    r = client.post("/recipes", headers=_auth_headers(token), json={"name": "R", "servings": 1})
-    recipe_id = r.json()["id"]
+    recipe_id = _create_recipe(client, token, name="R", servings=1)
 
     r = client.post(
         f"/recipes/{recipe_id}/items",
@@ -273,9 +277,7 @@ async def test_recipe_macros_ignore_out_of_scope_food(client: TestClient, sessio
     food_b_id = _create_food(client, token_b, name="FB", kcal_100g=100, protein_100g=0, carbs_100g=0, fat_100g=0)
 
     # User A recipe.
-    r = client.post("/recipes", headers=_auth_headers(token_a), json={"name": "R", "servings": 1})
-    assert r.status_code == 201
-    recipe_id = r.json()["id"]
+    recipe_id = _create_recipe(client, token_a, name="R", servings=1)
 
     # Compromise recipe_items directly (bypass API scoping) to reference user B's food.
     await session.execute(
@@ -300,3 +302,49 @@ async def test_recipe_macros_ignore_out_of_scope_food(client: TestClient, sessio
 
     assert Decimal(str(body["total_macros"]["kcal"])) == Decimal("0")
     assert Decimal(str(body["macros_per_serving"]["kcal"])) == Decimal("0")
+
+
+def test_recipe_favorite_endpoints_and_favorites_filter(client: TestClient) -> None:
+    token = _register(client, "r_favs@example.com")
+
+    rid_a = _create_recipe(client, token, name="A", servings=1)
+    rid_b = _create_recipe(client, token, name="B", servings=1)
+
+    r = client.post(f"/recipes/{rid_a}/favorite", headers=_auth_headers(token))
+    assert r.status_code == 204
+
+    r = client.get("/recipes?favorites_only=true", headers=_auth_headers(token))
+    assert r.status_code == 200
+    items = r.json()
+    assert len(items) == 1
+    assert items[0]["id"] == rid_a
+    assert items[0]["is_favorite"] is True
+
+    r = client.delete(f"/recipes/{rid_a}/favorite", headers=_auth_headers(token))
+    assert r.status_code == 204
+
+    r = client.get("/recipes?favorites_only=true", headers=_auth_headers(token))
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_recipe_tags_filter(client: TestClient) -> None:
+    token = _register(client, "r_tags@example.com")
+
+    rid_a = _create_recipe(client, token, name="A", servings=1, tags=["quick", "Dinner"])
+    _ = _create_recipe(client, token, name="B", servings=1, tags=["Dinner"])
+
+    r = client.get("/recipes?tags=quick&tags=dinner", headers=_auth_headers(token))
+    assert r.status_code == 200
+    items = r.json()
+    assert len(items) == 1
+    assert items[0]["id"] == rid_a
+    assert set([t.lower() for t in items[0]["tags"]]) == {"quick", "dinner"}
+
+
+def test_under_30_min_filter_returns_422_until_duration_supported(client: TestClient) -> None:
+    token = _register(client, "r_under30@example.com")
+    _ = _create_recipe(client, token, name="A", servings=1)
+
+    r = client.get("/recipes?under_30_min=true", headers=_auth_headers(token))
+    assert r.status_code == 422

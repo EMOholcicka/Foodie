@@ -83,6 +83,7 @@ def test_generate_creates_7_days_and_meal_slots(client: TestClient) -> None:
     assert resp.status_code == 201
     body = resp.json()
     assert body["week_start"] == week_start
+    assert "generation_summary" in body
 
     assert len(body["days"]) == 7
     for d in body["days"]:
@@ -152,6 +153,8 @@ def test_grocery_list_totals_match_recipe_ingredients_times_servings(client: Tes
     # Factor per recipe = total_servings/recipe.servings = 28/2 = 14
     # Total grams = item_grams * factor = 200 * 14 = 2800
     rice = next(i for i in items if i["food_id"] == food_id)
+    assert "item_key" in rice
+    assert rice["checked"] is False
     assert Decimal(str(rice["total_grams"])) == Decimal("2800.00")
 
     per_recipe = rice["per_recipe"]
@@ -159,6 +162,54 @@ def test_grocery_list_totals_match_recipe_ingredients_times_servings(client: Tes
     assert per_recipe[0]["recipe_id"] == recipe_id
     assert Decimal(str(per_recipe[0]["servings"])) == Decimal("28.00")
     assert Decimal(str(per_recipe[0]["grams"])) == Decimal("2800.00")
+
+
+def test_grocery_list_checked_state_persists_per_user_and_week(client: TestClient) -> None:
+    token = _register(client, "p_grocery_checks@example.com")
+
+    food_id = _create_food(client, token, name="Milk")
+    recipe_id = _create_recipe(client, token, name="Milkshake", servings=2)
+    _add_recipe_item(client, token, recipe_id=recipe_id, food_id=food_id, grams=200)
+
+    week_start = "2026-02-16"
+    gen = client.post(
+        "/plans/weekly/generate",
+        headers=_auth_headers(token),
+        json={"week_start": week_start, "target_kcal": 2000},
+    )
+    assert gen.status_code == 201
+
+    grocery1 = client.get(f"/plans/weekly/{week_start}/grocery-list", headers=_auth_headers(token))
+    assert grocery1.status_code == 200
+    milk = next(i for i in grocery1.json()["items"] if i["food_id"] == food_id)
+    assert milk["checked"] is False
+
+    put = client.put(
+        f"/plans/weekly/{week_start}/grocery-list/checks",
+        headers=_auth_headers(token),
+        json={"items": [{"item_key": milk["item_key"], "checked": True}]},
+    )
+    assert put.status_code == 204
+
+    grocery2 = client.get(f"/plans/weekly/{week_start}/grocery-list", headers=_auth_headers(token))
+    assert grocery2.status_code == 200
+    milk2 = next(i for i in grocery2.json()["items"] if i["food_id"] == food_id)
+    assert milk2["checked"] is True
+
+    # Different week should not inherit checked state.
+    other_week = "2026-02-23"
+    gen2 = client.post(
+        "/plans/weekly/generate",
+        headers=_auth_headers(token),
+        json={"week_start": other_week, "target_kcal": 2000},
+    )
+    assert gen2.status_code == 201
+
+    grocery3 = client.get(f"/plans/weekly/{other_week}/grocery-list", headers=_auth_headers(token))
+    assert grocery3.status_code == 200
+    milk3 = next(i for i in grocery3.json()["items"] if i["food_id"] == food_id)
+    assert milk3["checked"] is False
+
 
 
 def test_grocery_list_fails_if_recipe_references_missing_food(client: TestClient, monkeypatch) -> None:
@@ -220,7 +271,7 @@ def test_locked_meals_preserved_on_regeneration(client: TestClient, monkeypatch)
     orig_generate = plans_crud.generate_weekly_plan_for_user
 
     async def generate_with_locked_breakfast(*, session, user_id, payload):
-        plan = await orig_generate(session=session, user_id=user_id, payload=payload)
+        plan, summary = await orig_generate(session=session, user_id=user_id, payload=payload)
         # Mutate the in-memory plan before response serialization.
         mon = next(d for d in plan.days if str(d.date) == str(payload.week_start))
         b = next(m for m in mon.meals if m.meal_type.value == "breakfast")
@@ -228,7 +279,7 @@ def test_locked_meals_preserved_on_regeneration(client: TestClient, monkeypatch)
         b.servings = Decimal("2.00")
         b.locked = True
         await session.flush()
-        return plan
+        return plan, summary
 
     monkeypatch.setattr(plans_crud, "generate_weekly_plan_for_user", generate_with_locked_breakfast)
 
@@ -238,6 +289,11 @@ def test_locked_meals_preserved_on_regeneration(client: TestClient, monkeypatch)
         json={"week_start": str(week_start), "target_kcal": 2000},
     )
     assert regen.status_code == 201
+
+    # Regen returns summary (counts depend on generator; we only assert presence/shape).
+    summary = regen.json().get("generation_summary")
+    assert summary is not None
+    assert set(summary.keys()) == {"locked_kept", "locked_changed", "unlocked_changed"}
 
     monday = regen.json()["days"][0]
     assert monday["id"] != day_id  # children are replaced
@@ -376,6 +432,22 @@ def test_swap_rejects_date_outside_week(client: TestClient) -> None:
     assert swap.status_code == 422
 
 
+def test_swap_missing_plan_returns_404(client: TestClient) -> None:
+    token = _register(client, "p_swap_missing_plan@example.com")
+
+    f = _create_food(client, token, name="F")
+    r = _create_recipe(client, token, name="R", servings=2)
+    _add_recipe_item(client, token, recipe_id=r, food_id=f, grams=100)
+
+    week_start = "2026-02-16"
+    swap = client.patch(
+        f"/plans/weekly/{week_start}/meals:swap",
+        headers=_auth_headers(token),
+        json={"date": "2026-02-16", "meal_type": "breakfast", "new_recipe_id": r},
+    )
+    assert swap.status_code == 404
+
+
 def test_swap_rejects_recipe_not_owned(client: TestClient) -> None:
     token_a = _register(client, "p_swap_owner_a@example.com")
     token_b = _register(client, "p_swap_owner_b@example.com")
@@ -401,4 +473,42 @@ def test_swap_rejects_recipe_not_owned(client: TestClient) -> None:
         headers=_auth_headers(token_a),
         json={"date": "2026-02-16", "meal_type": "breakfast", "new_recipe_id": rb},
     )
-    assert swap.status_code == 422
+    assert swap.status_code == 404
+
+
+def test_toggle_lock_endpoint_updates_meal_lock_state(client: TestClient) -> None:
+    token = _register(client, "p_toggle_lock@example.com")
+
+    food_id = _create_food(client, token, name="F")
+    recipe_id = _create_recipe(client, token, name="R", servings=2)
+    _add_recipe_item(client, token, recipe_id=recipe_id, food_id=food_id, grams=100)
+
+    week_start = "2026-02-16"
+    gen = client.post(
+        "/plans/weekly/generate",
+        headers=_auth_headers(token),
+        json={"week_start": week_start, "target_kcal": 2000},
+    )
+    assert gen.status_code == 201
+
+    monday = next(d for d in gen.json()["days"] if d["date"] == week_start)
+    meal = next(m for m in monday["meals"] if m["meal_type"] == "breakfast")
+    assert meal["locked"] is False
+
+    lock = client.patch(
+        f"/plans/weekly/{week_start}/meals/{meal['id']}?locked=true",
+        headers=_auth_headers(token),
+    )
+    assert lock.status_code == 200
+    monday2 = next(d for d in lock.json()["days"] if d["date"] == week_start)
+    meal2 = next(m for m in monday2["meals"] if m["id"] == meal["id"])
+    assert meal2["locked"] is True
+
+    unlock = client.patch(
+        f"/plans/weekly/{week_start}/meals/{meal['id']}?locked=false",
+        headers=_auth_headers(token),
+    )
+    assert unlock.status_code == 200
+    monday3 = next(d for d in unlock.json()["days"] if d["date"] == week_start)
+    meal3 = next(m for m in monday3["meals"] if m["id"] == meal["id"])
+    assert meal3["locked"] is False

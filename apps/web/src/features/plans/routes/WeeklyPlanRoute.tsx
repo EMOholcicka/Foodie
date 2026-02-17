@@ -1,9 +1,12 @@
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import LockIcon from "@mui/icons-material/Lock";
+import LockOpenIcon from "@mui/icons-material/LockOpen";
 import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 import LocalGroceryStoreIcon from "@mui/icons-material/LocalGroceryStore";
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   ButtonBase,
@@ -23,6 +26,7 @@ import {
   LinearProgress,
   MenuItem,
   Select,
+  Snackbar,
   Stack,
   Switch,
   TextField,
@@ -31,21 +35,26 @@ import {
   Typography,
 } from "@mui/material";
 import dayjs from "dayjs";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { useGenerateWeeklyPlanMutation, useSwapWeeklyPlanMealMutation, useWeeklyPlanQuery } from "../api/plansQueries";
+import {
+  useGenerateWeeklyPlanMutation,
+  useSetWeeklyPlanMealLockMutation,
+  useSwapWeeklyPlanMealMutation,
+  useWeeklyPlanQuery,
+} from "../api/plansQueries";
 import {
   fmtDate,
   getWeekStartFromUrlOrStorage,
-  mealTypeShort,
   persistLastWeekStart,
-  startOfIsoWeek,
   weekLabel,
   weekdays,
 } from "../domain/week";
 import type { MealType, SwapWeeklyPlanMealRequest, WeeklyPlanDay, WeeklyPlanGenerateRequest, WeeklyPlanMeal } from "../api/plansApi";
 import { useRecipesListQuery } from "../../recipes/api/recipesQueries";
+import { isApiError } from "../../../shared/api/http";
+import { IllustrationPanel, PlanGenerateIllustration, PlanLoadFailIllustration } from "../../../shared/graphics";
 
 type TrainingDayType = "lift" | "run" | "rest";
 
@@ -59,6 +68,12 @@ function MacroLine({ kcal, p, c, f }: { kcal: number; p: number; c: number; f: n
       {Math.round(kcal)} kcal • P {p.toFixed(0)}g • C {c.toFixed(0)}g • F {f.toFixed(0)}g
     </Typography>
   );
+}
+
+function recipeNameById(recipes: Array<{ id: string; name: string }> | undefined, recipeId: string | null | undefined) {
+  if (!recipeId) return null;
+  const found = (recipes ?? []).find((r) => r.id === recipeId);
+  return found?.name ?? null;
 }
 
 function findDay(days: WeeklyPlanDay[] | undefined, date: string) {
@@ -138,6 +153,7 @@ export function WeeklyPlanRoute() {
   const genMutation = useGenerateWeeklyPlanMutation();
 
   const [targetKcal, setTargetKcal] = useState(2200);
+  const [toast, setToast] = useState<string | null>(null);
   const [template, setTemplate] = useState<WeeklyPlanGenerateRequest["template"]>("recomp_2200");
 
   const [training, setTraining] = useState<Record<string, TrainingDayType>>({
@@ -159,10 +175,18 @@ export function WeeklyPlanRoute() {
 
   const recipesQuery = useRecipesListQuery();
   const swapMutation = useSwapWeeklyPlanMealMutation(weekStart);
+  const lockMutation = useSetWeeklyPlanMealLockMutation(weekStart);
 
   const [swapOpen, setSwapOpen] = useState(false);
   const [swapMeal, setSwapMeal] = useState<{ date: string; meal: WeeklyPlanMeal } | null>(null);
   const [swapRecipeId, setSwapRecipeId] = useState<string>("");
+  const [swapLock, setSwapLock] = useState(true);
+
+  const swapRecipeInputRef = useRef<HTMLInputElement | null>(null);
+  const swapContextId = useMemo(() => {
+    if (!swapMeal) return "swap-meal-context";
+    return `swap-meal-context-${swapMeal.date}-${swapMeal.meal.meal_type}`;
+  }, [swapMeal]);
 
   const weekDays = useMemo(() => {
     return weekdays().map((i) => {
@@ -205,7 +229,13 @@ export function WeeklyPlanRoute() {
       },
     };
 
-    await genMutation.mutateAsync(payload);
+    const res = await genMutation.mutateAsync(payload);
+    const s = res.generation_summary;
+    if (s) {
+      setToast(`Plan generated • ${s.locked_kept} locked kept`);
+    } else {
+      setToast("Plan generated");
+    }
   }
 
   return (
@@ -255,16 +285,18 @@ export function WeeklyPlanRoute() {
         {planQuery.isLoading ? <LinearProgress /> : null}
 
         {planQuery.isError ? (
-          <Alert
-            severity="error"
-            action={
-              <Button color="inherit" size="small" onClick={() => planQuery.refetch()}>
-                Retry
-              </Button>
+          <IllustrationPanel
+            title="Couldn’t load your weekly plan"
+            description="Check your connection and try again. Your generator settings are still here."
+            illustration={<PlanLoadFailIllustration className="foodie-illustration" />}
+            actions={
+              <>
+                <Button variant="contained" onClick={() => planQuery.refetch()} size="small">
+                  Retry
+                </Button>
+              </>
             }
-          >
-            Failed to load weekly plan.
-          </Alert>
+          />
         ) : null}
 
         {planQuery.isSuccess && !planQuery.data ? <Alert severity="info">No plan yet. Generate one.</Alert> : null}
@@ -340,7 +372,12 @@ export function WeeklyPlanRoute() {
         >
           <Stack spacing={1.5}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
-              <Typography variant="subtitle2">Generator</Typography>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Box aria-hidden sx={{ width: 30, height: 30, opacity: 0.95 }}>
+                  <PlanGenerateIllustration className="foodie-gen-mark" />
+                </Box>
+                <Typography variant="subtitle2">Generator</Typography>
+              </Stack>
               <Button variant="contained" onClick={() => void generate()} disabled={genMutation.isPending} size="small">
                 Generate
               </Button>
@@ -430,7 +467,7 @@ export function WeeklyPlanRoute() {
 
             <Divider />
             <Typography variant="caption" color="text.secondary">
-              Swap meals: open a day and use “Swap”.
+              Change recipes: open a day and use “Change recipe”.
             </Typography>
           </Stack>
         </Box>
@@ -450,49 +487,93 @@ export function WeeklyPlanRoute() {
               <Button onClick={() => setDrawerOpen(false)}>Close</Button>
             </Stack>
 
-            {drawerDay ? <MacroLine kcal={drawerDay.totals.kcal} p={drawerDay.totals.protein_g} c={drawerDay.totals.carbs_g} f={drawerDay.totals.fat_g} /> : null}
+            {drawerDay?.totals ? (
+              <MacroLine
+                kcal={drawerDay.totals.kcal}
+                p={drawerDay.totals.protein_g}
+                c={drawerDay.totals.carbs_g}
+                f={drawerDay.totals.fat_g}
+              />
+            ) : null}
 
             <Stack spacing={1}>
               {(drawerDay?.meals ?? [])
                 .slice()
                 .sort((a, b) => MEAL_ORDER.indexOf(a.meal_type) - MEAL_ORDER.indexOf(b.meal_type))
-                .map((m) => (
-                  <Box
-                    key={m.id}
-                    sx={{
-                      border: (t) => `1px solid ${t.palette.divider}`,
-                      borderRadius: 2,
-                      p: 1.5,
-                      bgcolor: "background.paper",
-                    }}
-                  >
-                    <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="subtitle2" noWrap>
-                          {m.meal_type}
-                        </Typography>
-                        <Typography variant="body2" noWrap title={m.recipe_name ?? ""}>
-                          {m.recipe_name ?? "—"}
-                        </Typography>
-                        <MacroLine kcal={m.totals.kcal} p={m.totals.protein_g} c={m.totals.carbs_g} f={m.totals.fat_g} />
-                      </Box>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<SwapHorizIcon />}
-                        onClick={() => {
-                          if (!drawerDay?.date) return;
-                          setSwapMeal({ date: drawerDay.date, meal: m });
-                          setSwapRecipeId(m.recipe_id ?? "");
-                          setSwapOpen(true);
-                        }}
-                        aria-label={`Swap ${m.meal_type}`}
-                      >
-                        Swap
-                      </Button>
-                    </Stack>
-                  </Box>
-                ))}
+                .map((m) => {
+                  const recipeName = recipeNameById(recipesQuery.data, m.recipe_id);
+
+                  return (
+                    <Box
+                      key={m.id}
+                      sx={{
+                        border: (t) => `1px solid ${t.palette.divider}`,
+                        borderRadius: 2,
+                        p: 1.5,
+                        bgcolor: "background.paper",
+                      }}
+                    >
+                      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+                        <Box sx={{ minWidth: 0 }}>
+                          <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                            <Typography variant="subtitle2" noWrap>
+                              {m.meal_type}
+                            </Typography>
+                            {m.locked ? (
+                              <Chip
+                                size="small"
+                                color="default"
+                                icon={<LockIcon />}
+                                label="Locked"
+                                variant="outlined"
+                                aria-label={`${m.meal_type} locked`}
+                              />
+                            ) : null}
+                          </Stack>
+                          <Typography variant="body2" noWrap title={recipeName ?? ""}>
+                            {recipeName ?? "—"}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Servings: {Number(m.servings).toFixed(2)}
+                          </Typography>
+                        </Box>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <IconButton
+                            size="small"
+                            onClick={async () => {
+                              if (!drawerDay?.date) return;
+                              try {
+                                await lockMutation.mutateAsync({ mealId: m.id, locked: !m.locked });
+                                setToast(!m.locked ? `${m.meal_type} locked` : `${m.meal_type} unlocked`);
+                              } catch {
+                                setToast("Failed to update lock");
+                              }
+                            }}
+                            aria-label={m.locked ? `Unlock ${m.meal_type}` : `Lock ${m.meal_type}`}
+                          >
+                            {m.locked ? <LockIcon fontSize="small" /> : <LockOpenIcon fontSize="small" />}
+                          </IconButton>
+
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<SwapHorizIcon />}
+                            onClick={() => {
+                              if (!drawerDay?.date) return;
+                              setSwapMeal({ date: drawerDay.date, meal: m });
+                              setSwapRecipeId(m.recipe_id ?? "");
+                              setSwapLock(true);
+                              setSwapOpen(true);
+                            }}
+                            aria-label={`Change recipe for ${m.meal_type}`}
+                          >
+                            Change recipe
+                          </Button>
+                        </Stack>
+                      </Stack>
+                    </Box>
+                  );
+                })}
             </Stack>
 
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
@@ -520,34 +601,73 @@ export function WeeklyPlanRoute() {
         </Container>
       </Drawer>
 
-      <Dialog open={swapOpen} onClose={() => setSwapOpen(false)} fullWidth maxWidth="sm" aria-labelledby="swap-meal-title">
-        <DialogTitle id="swap-meal-title">Swap meal</DialogTitle>
+      <Dialog
+        open={swapOpen}
+        onClose={() => setSwapOpen(false)}
+        fullWidth
+        maxWidth="sm"
+        aria-labelledby="swap-meal-title"
+        aria-describedby={swapContextId}
+      >
+        <DialogTitle id="swap-meal-title">Change recipe</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
-            <Typography variant="body2" color="text.secondary">
+            <Typography id={swapContextId} variant="body2" color="text.secondary">
               {swapMeal ? `${swapMeal.date} • ${swapMeal.meal.meal_type}` : ""}
             </Typography>
 
             {recipesQuery.isLoading ? <LinearProgress /> : null}
 
-            <FormControl fullWidth size="small">
-              <InputLabel id="swap-recipe-label">Recipe</InputLabel>
-              <Select
-                labelId="swap-recipe-label"
-                label="Recipe"
-                value={swapRecipeId}
-                onChange={(e) => setSwapRecipeId(String(e.target.value))}
-                data-testid="swap-recipe-select"
-              >
-                {(recipesQuery.data ?? []).map((r) => (
-                  <MenuItem key={r.id} value={r.id}>
-                    {r.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <Autocomplete
+              fullWidth
+              size="small"
+              options={recipesQuery.data ?? []}
+              loading={recipesQuery.isLoading}
+              value={(recipesQuery.data ?? []).find((r) => r.id === swapRecipeId) ?? null}
+              onChange={(_e, v) => setSwapRecipeId(v?.id ?? "")}
+              isOptionEqualToValue={(o, v) => o.id === v.id}
+              getOptionLabel={(o) => o.name}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Recipe"
+                  inputRef={(el) => {
+                    swapRecipeInputRef.current = el;
+                    const originalRef = params.inputProps.ref;
+                    if (typeof originalRef === "function") originalRef(el);
+                    else if (originalRef) (originalRef as any).current = el;
+                  }}
+                  autoFocus
+                  inputProps={{
+                    ...params.inputProps,
+                    "data-testid": "swap-recipe-autocomplete",
+                    "aria-describedby": swapContextId,
+                  }}
+                />
+              )}
+            />
 
-            {swapMutation.isError ? <Alert severity="error">Failed to swap meal.</Alert> : null}
+            <FormControlLabel
+              control={<Switch checked={swapLock} onChange={(e) => setSwapLock(e.target.checked)} />}
+              label={
+                <Stack spacing={0.25}>
+                  <Typography variant="body2">Lock this meal</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    If unlocked, future regenerations may replace this meal.
+                  </Typography>
+                </Stack>
+              }
+            />
+
+            {swapMutation.isError ? (
+              <Alert severity="error">
+                {(() => {
+                  const err = swapMutation.error;
+                  if (isApiError(err)) return err.data.error.message ?? "We couldn’t change this recipe. Please try again.";
+                  return "We couldn’t change this recipe. Please try again.";
+                })()}
+              </Alert>
+            ) : null}
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -561,16 +681,29 @@ export function WeeklyPlanRoute() {
                 date: swapMeal.date,
                 meal_type: swapMeal.meal.meal_type,
                 new_recipe_id: swapRecipeId,
-                lock: true,
+                lock: swapLock,
               };
-              await swapMutation.mutateAsync(payload);
-              setSwapOpen(false);
+              try {
+                await swapMutation.mutateAsync(payload);
+                setSwapOpen(false);
+                setToast(swapLock ? "Meal swapped and locked" : "Meal swapped");
+              } catch {
+                // Keep dialog open on error; error UI is shown above.
+              }
             }}
           >
             Save
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={!!toast}
+        autoHideDuration={2500}
+        onClose={() => setToast(null)}
+        message={toast ?? ""}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      />
     </Container>
   );
 }

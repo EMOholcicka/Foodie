@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, delete, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.day import Day
 from app.models.food import Food
+from app.models.meal_entry import MealEntry
+from app.models.user_food_favorite import UserFoodFavorite
 
 
 async def create_food_for_user(
@@ -58,6 +61,117 @@ async def list_foods_for_user(
     stmt = stmt.limit(limit)
     res = await session.execute(stmt)
     return list(res.scalars().all())
+
+
+async def set_favorite(
+    *,
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    food_id: uuid.UUID,
+    is_favorite: bool,
+) -> None:
+    if is_favorite:
+        # Idempotent insert.
+        session.add(UserFoodFavorite(user_id=user_id, food_id=food_id))
+        return
+
+    stmt = delete(UserFoodFavorite).where(
+        UserFoodFavorite.user_id == user_id,
+        UserFoodFavorite.food_id == food_id,
+    )
+    await session.execute(stmt)
+
+
+async def list_favorites_for_user(
+    *,
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    limit: int = 50,
+) -> list[Food]:
+    stmt = (
+        select(Food)
+        .join(UserFoodFavorite, UserFoodFavorite.food_id == Food.id)
+        .where(UserFoodFavorite.user_id == user_id)
+        .order_by(UserFoodFavorite.created_at.desc())
+        .limit(limit)
+    )
+    res = await session.execute(stmt)
+    return list(res.scalars().all())
+
+
+async def list_recent_for_user(
+    *,
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    limit: int = 20,
+) -> list[Food]:
+    """Most recently used foods for a user (deduped, ordered by last use).
+
+    CRITICAL: Must be scoped to the current user's `MealEntry` rows to avoid
+    cross-user leakage.
+
+    Postgres-friendly single-query approach:
+    - compute max(meal_entries.created_at) per food_id for the user
+    - join to foods constrained to global-or-owned
+    - order by that max timestamp desc
+
+    NOTE: We intentionally don't attempt to include foods that are no longer in
+    scope (e.g. another user's private food).
+    """
+
+    last_used_sq = (
+        select(
+            MealEntry.food_id.label("food_id"),
+            MealEntry.created_at.label("used_at"),
+        )
+        .join(Food, Food.id == MealEntry.food_id)
+        .join(Day, Day.id == MealEntry.day_id)
+        .where(Day.user_id == user_id)
+        .where(MealEntry.food_id.is_not(None))
+        .where(or_(Food.user_id.is_(None), Food.user_id == user_id))
+        .distinct(MealEntry.food_id)
+        .order_by(MealEntry.food_id.asc(), MealEntry.created_at.desc())
+        .subquery()
+    )
+
+    stmt = (
+        select(Food)
+        .join(last_used_sq, last_used_sq.c.food_id == Food.id)
+        .order_by(last_used_sq.c.used_at.desc(), Food.name.asc())
+        .limit(limit)
+    )
+
+    res = await session.execute(stmt)
+    return list(res.scalars().all())
+
+
+async def get_favorite_map_for_user(
+    *,
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    food_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, bool]:
+    if not food_ids:
+        return {}
+
+    stmt = select(UserFoodFavorite.food_id).where(
+        UserFoodFavorite.user_id == user_id,
+        UserFoodFavorite.food_id.in_(food_ids),
+    )
+    res = await session.execute(stmt)
+    fav_ids = set(res.scalars().all())
+    return {fid: (fid in fav_ids) for fid in food_ids}
+
+
+async def is_food_favorite(
+    *,
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    food_id: uuid.UUID,
+) -> bool:
+    stmt = select(exists().where(UserFoodFavorite.user_id == user_id, UserFoodFavorite.food_id == food_id))
+    res = await session.execute(stmt)
+    return bool(res.scalar())
 
 
 async def get_food_for_user_scope(

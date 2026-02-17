@@ -1,5 +1,19 @@
 import axios, { AxiosError, type AxiosInstance, type AxiosRequestConfig } from "axios";
 
+export type ApiErrorShape = {
+  error: {
+    message?: string;
+    // allow backend to send richer details without breaking the type guard
+    [k: string]: unknown;
+  };
+};
+
+export function isApiError(err: unknown): err is AxiosError<ApiErrorShape> {
+  if (!axios.isAxiosError(err)) return false;
+  const data: any = err.response?.data;
+  return !!data && typeof data === "object" && "error" in data && typeof (data as any).error === "object";
+}
+
 const baseURL = (import.meta as any).env?.VITE_API_BASE_URL ?? "/api";
 
 function looksLikeHtml(payload: unknown): boolean {

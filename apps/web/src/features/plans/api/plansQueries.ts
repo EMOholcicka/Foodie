@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  bulkUpdateGroceryChecks,
   generateWeeklyPlan,
   getWeeklyGroceryList,
   getWeeklyPlan,
+  setWeeklyPlanMealLock,
   swapWeeklyPlanMeal,
   type GroceryListResponse,
   type SwapWeeklyPlanMealRequest,
@@ -35,6 +37,18 @@ export function useWeeklyGroceryListQuery(weekStart: string) {
   });
 }
 
+export function useBulkUpdateGroceryChecksMutation(weekStart: string) {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: (items: Array<{ item_key: string; checked: boolean }>) =>
+      bulkUpdateGroceryChecks(weekStart, { items }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: plansQueryKeys.groceryList(weekStart) });
+    },
+  });
+}
+
 export function useGenerateWeeklyPlanMutation() {
   const qc = useQueryClient();
 
@@ -54,6 +68,19 @@ export function useSwapWeeklyPlanMealMutation(weekStart: string) {
 
   return useMutation({
     mutationFn: (payload: SwapWeeklyPlanMealRequest) => swapWeeklyPlanMeal(weekStart, payload),
+    onSuccess: async (data: WeeklyPlan) => {
+      qc.setQueryData(plansQueryKeys.weekly(data.week_start), data);
+      await qc.invalidateQueries({ queryKey: plansQueryKeys.groceryList(data.week_start) });
+    },
+  });
+}
+
+export function useSetWeeklyPlanMealLockMutation(weekStart: string) {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ mealId, locked }: { mealId: string; locked: boolean }) =>
+      setWeeklyPlanMealLock(weekStart, mealId, locked),
     onSuccess: async (data: WeeklyPlan) => {
       qc.setQueryData(plansQueryKeys.weekly(data.week_start), data);
       await qc.invalidateQueries({ queryKey: plansQueryKeys.groceryList(data.week_start) });
@@ -81,10 +108,15 @@ export function storeGroceryCheckedMap(weekStart: string, map: Record<string, bo
 }
 
 export function groceryListToClipboardText(data: GroceryListResponse, mode: "category" | "recipe") {
-  const items = data.items.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const items = data.items
+    .slice()
+    .sort((a, b) => (a.food_name ?? a.item_key).localeCompare(b.food_name ?? b.item_key));
+
   const groupKey = (it: (typeof items)[number]) => {
-    if (mode === "recipe") return it.recipe_name ?? "Other";
-    return it.category ?? "Other";
+    if (mode === "category") return "Grocery";
+    if (it.per_recipe.length === 1) return it.per_recipe[0]?.recipe_name ?? "Other";
+    if (it.per_recipe.length > 1) return "Multiple recipes";
+    return "Other";
   };
 
   const grouped = new Map<string, (typeof items)[number][]>();
@@ -97,8 +129,9 @@ export function groceryListToClipboardText(data: GroceryListResponse, mode: "cat
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, arr]) => {
       const lines = arr
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((i) => `- ${i.name}: ${Math.round(i.grams)} g`);
+        .slice()
+        .sort((a, b) => (a.food_name ?? a.item_key).localeCompare(b.food_name ?? b.item_key))
+        .map((i) => `- ${i.food_name ?? i.item_key}: ${Math.round(i.total_grams)} g`);
       return `${k}\n${lines.join("\n")}`;
     })
     .join("\n\n");
@@ -110,10 +143,20 @@ export function groceryListToCsv(data: GroceryListResponse) {
     return `"${s}"`;
   };
 
-  const header = ["name", "grams", "category", "recipe"].join(",");
+  const header = ["food_name", "total_grams", "item_key", "recipes"].join(",");
   const rows = data.items
     .slice()
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((i) => [escape(i.name), `${i.grams}`, escape(i.category ?? ""), escape(i.recipe_name ?? "")].join(","));
+    .sort((a, b) => (a.food_name ?? a.item_key).localeCompare(b.food_name ?? b.item_key))
+    .map((i) => {
+      const recipes = i.per_recipe
+        .map((r) => `${r.recipe_name ?? r.recipe_id} (${Number(r.grams).toFixed(0)}g)`)
+        .join("; ");
+      return [
+        escape(i.food_name ?? ""),
+        `${i.total_grams}`,
+        escape(i.item_key),
+        escape(recipes),
+      ].join(",");
+    });
   return [header, ...rows].join("\n");
 }

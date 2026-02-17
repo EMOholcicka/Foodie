@@ -8,6 +8,7 @@ import type { Recipe } from "../api/recipesApi";
 vi.mock("../api/recipesQueries", () => {
   return {
     useRecipesListQuery: vi.fn(),
+    useToggleRecipeFavoriteMutation: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   };
 });
 
@@ -20,6 +21,8 @@ function makeRecipe(overrides: Partial<Recipe>): Recipe {
     user_id: "u1",
     name: "Pasta",
     servings: 2,
+    tags: [],
+    is_favorite: false,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     items: [],
@@ -95,5 +98,40 @@ describe("RecipesListRoute", () => {
     renderRoute();
 
     expect(screen.getByText("Chicken soup")).toBeInTheDocument();
+  });
+  it("toggles favorites via pin button", async () => {
+    const mutate = vi.fn();
+    const { useToggleRecipeFavoriteMutation } = await import("../api/recipesQueries");
+    vi.mocked(useToggleRecipeFavoriteMutation as any).mockReturnValue({ mutate, isPending: false });
+
+    vi.mocked(useRecipesListQuery).mockReturnValue({
+      data: [makeRecipe({ id: "a", name: "Chicken soup", is_favorite: false })],
+      isSuccess: true,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as any);
+
+    renderRoute();
+
+    await userEvent.click(screen.getByRole("button", { name: /pin recipe/i }));
+    expect(mutate).toHaveBeenCalledWith(false);
+  });
+
+  it("shows tag filter options based on data", async () => {
+    vi.mocked(useRecipesListQuery).mockReturnValue({
+      data: [makeRecipe({ id: "a", tags: ["Dinner"] }), makeRecipe({ id: "b", tags: ["Quick"] })],
+      isSuccess: true,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as any);
+
+    renderRoute();
+
+    // opens the select
+    await userEvent.click(screen.getByLabelText(/filter by tag/i));
+    expect(await screen.findByText("Dinner")).toBeInTheDocument();
+    expect(await screen.findByText("Quick")).toBeInTheDocument();
   });
 });

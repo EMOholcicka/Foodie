@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from collections import defaultdict
 from datetime import date, timedelta
@@ -14,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.crud.foods import get_food_for_user_scope
 from app.crud.recipes import get_recipe_for_user
 from app.models.food import Food
+from app.models.grocery_list_item_check import GroceryListItemCheck
 from app.models.meal_entry import MealType
 from app.models.recipe import Recipe
 from app.models.weekly_plan import WeeklyPlan, WeeklyPlanDay, WeeklyPlanMeal
@@ -99,7 +101,7 @@ async def _list_recipes_for_generation(*, session: AsyncSession, user_id: uuid.U
 
 async def generate_weekly_plan_for_user(
     *, session: AsyncSession, user_id: uuid.UUID, payload: GenerateWeeklyPlanRequest
-) -> WeeklyPlan:
+) -> tuple[WeeklyPlan, dict[str, int]]:
     """Generate or regenerate a weekly plan.
 
     The caller controls the transaction scope (FastAPI request or test fixture).
@@ -138,6 +140,7 @@ async def generate_weekly_plan_for_user(
     plan = existing_res.scalar_one_or_none()
 
     locked_by_key: dict[tuple[date, MealType], tuple[uuid.UUID, Decimal]] = {}
+    locked_total = 0
 
     if plan is None:
         plan = WeeklyPlan(
@@ -163,6 +166,7 @@ async def generate_weekly_plan_for_user(
         locked_res = await session.execute(locked_stmt)
         for day_date, meal_type, recipe_id, servings in locked_res.all():
             locked_by_key[(day_date, meal_type)] = (recipe_id, Decimal(servings))
+        locked_total = len(locked_by_key)
 
         # Update plan metadata in place.
         plan.target_kcal = payload.target_kcal
@@ -189,6 +193,11 @@ async def generate_weekly_plan_for_user(
         )
         await session.flush()
 
+    # Summary counters (computed vs deterministic choice).
+    locked_kept = 0
+    locked_changed = 0
+    unlocked_changed = 0
+
     for day_idx in range(7):
         d = WeeklyPlanDay(weekly_plan_id=plan.id, date=payload.week_start + timedelta(days=day_idx))
         session.add(d)
@@ -197,14 +206,23 @@ async def generate_weekly_plan_for_user(
         for meal_idx, meal_type in enumerate(_MEAL_SLOTS):
             key = (d.date, meal_type)
             locked = locked_by_key.get(key)
+
+            chosen = recipes[_pick_index(seed=seed, day_idx=day_idx, meal_idx=meal_idx, n=len(recipes))]
+            chosen_recipe_id = chosen.id
+
             if locked is not None:
                 recipe_id, servings = locked
                 locked_flag = True
+
+                if recipe_id == chosen_recipe_id:
+                    locked_kept += 1
+                else:
+                    locked_changed += 1
             else:
-                chosen = recipes[_pick_index(seed=seed, day_idx=day_idx, meal_idx=meal_idx, n=len(recipes))]
-                recipe_id = chosen.id
+                recipe_id = chosen_recipe_id
                 servings = Decimal("1.00")
                 locked_flag = False
+                unlocked_changed += 1
 
             session.add(
                 WeeklyPlanMeal(
@@ -224,7 +242,17 @@ async def generate_weekly_plan_for_user(
     for d in plan.days:
         await session.refresh(d, attribute_names=["meals"])
 
-    return plan
+    summary = {
+        "locked_kept": locked_kept,
+        "locked_changed": locked_changed,
+        "unlocked_changed": unlocked_changed,
+    }
+    # Sanity: if there were no locked meals, kept/changed must be 0.
+    if locked_total == 0:
+        summary["locked_kept"] = 0
+        summary["locked_changed"] = 0
+
+    return plan, summary
 
 
 async def swap_weekly_plan_meal_for_user(
@@ -239,10 +267,7 @@ async def swap_weekly_plan_meal_for_user(
     if payload.date < week_start or payload.date > (week_start + timedelta(days=6)):
         raise ValueError("date must be within the specified week")
 
-    recipe = await get_recipe_for_user(session=session, user_id=user_id, recipe_id=payload.new_recipe_id)
-    if recipe is None:
-        raise ValueError("Recipe not found")
-
+    # Load plan first so we can differentiate 404 (missing plan/slot) from 422 (validation).
     plan_stmt = (
         select(WeeklyPlan)
         .where(WeeklyPlan.user_id == user_id, WeeklyPlan.week_start == week_start)
@@ -252,15 +277,19 @@ async def swap_weekly_plan_meal_for_user(
     plan_res = await session.execute(plan_stmt)
     plan = plan_res.scalar_one_or_none()
     if plan is None:
-        raise ValueError("Weekly plan not found")
+        raise LookupError("Weekly plan not found")
 
     day = next((d for d in plan.days if d.date == payload.date), None)
     if day is None:
-        raise ValueError("Weekly plan day not found")
+        raise LookupError("Weekly plan day not found")
 
     meal = next((m for m in day.meals if m.meal_type == payload.meal_type), None)
     if meal is None:
-        raise ValueError("Weekly plan meal slot not found")
+        raise LookupError("Weekly plan meal slot not found")
+
+    recipe = await get_recipe_for_user(session=session, user_id=user_id, recipe_id=payload.new_recipe_id)
+    if recipe is None:
+        raise LookupError("Recipe not found")
 
     meal.recipe_id = recipe.id
     meal.locked = bool(payload.lock)
@@ -272,6 +301,149 @@ async def swap_weekly_plan_meal_for_user(
         await session.refresh(d, attribute_names=["meals"])
 
     return plan
+
+
+async def set_weekly_plan_meal_lock_for_user(
+    *,
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    week_start: date,
+    meal_id: uuid.UUID,
+    locked: bool,
+) -> WeeklyPlan:
+    await _pg_advisory_xact_lock(session=session, user_id=user_id, week_start=week_start)
+
+    plan_stmt = (
+        select(WeeklyPlan)
+        .where(WeeklyPlan.user_id == user_id, WeeklyPlan.week_start == week_start)
+        .options(selectinload(WeeklyPlan.days).selectinload(WeeklyPlanDay.meals))
+        .with_for_update()
+    )
+    plan_res = await session.execute(plan_stmt)
+    plan = plan_res.scalar_one_or_none()
+    if plan is None:
+        raise LookupError("Weekly plan not found")
+
+    meal: WeeklyPlanMeal | None = None
+    for d in plan.days:
+        for m in d.meals:
+            if m.id == meal_id:
+                meal = m
+                break
+        if meal is not None:
+            break
+
+    if meal is None:
+        raise LookupError("Weekly plan meal not found")
+
+    meal.locked = bool(locked)
+    await session.flush()
+
+    await session.refresh(plan)
+    await session.refresh(plan, attribute_names=["days"])
+    for d in plan.days:
+        await session.refresh(d, attribute_names=["meals"])
+
+    return plan
+
+
+_slug_ws = re.compile(r"\s+")
+
+
+def grocery_item_key_from_food(*, food: Food) -> str:
+    # Stable, low-tech key: normalized food name + brand (if present).
+    # This keeps matches stable across regenerated lists, and is user friendly.
+    name = (food.name or "").strip().casefold()
+    brand = (food.brand or "").strip().casefold() if hasattr(food, "brand") else ""
+    base = _slug_ws.sub(" ", name)
+    if brand:
+        base = f"{base}|{_slug_ws.sub(' ', brand)}"
+    return base[:300]
+
+
+async def _checked_map_for_week(
+    *, session: AsyncSession, user_id: uuid.UUID, week_start: date
+) -> dict[str, bool]:
+    stmt = select(GroceryListItemCheck.item_key, GroceryListItemCheck.checked).where(
+        GroceryListItemCheck.user_id == user_id,
+        GroceryListItemCheck.week_start == week_start,
+    )
+    res = await session.execute(stmt)
+    return {k: bool(v) for k, v in res.all()}
+
+
+async def upsert_grocery_item_check(
+    *, session: AsyncSession, user_id: uuid.UUID, week_start: date, item_key: str, checked: bool
+) -> None:
+    """Postgres-safe upsert with sqlite-compatible fallback.
+
+    Production can receive concurrent PUTs from debounced clients; update-then-insert
+    is racy under concurrency. On Postgres we use `INSERT .. ON CONFLICT DO UPDATE`.
+
+    In tests we run on SQLite; use update-then-insert with an IntegrityError retry.
+    """
+
+    if session.bind is not None and session.bind.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+
+        stmt = insert(GroceryListItemCheck).values(
+            user_id=user_id,
+            week_start=week_start,
+            item_key=item_key,
+            checked=checked,
+        )
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_grocery_checks_user_week_key",
+            set_={"checked": checked},
+        )
+        await session.execute(stmt)
+        await session.flush()
+        return
+
+    # sqlite (tests) and other dialects: update-first then insert, with retry.
+    update_stmt = (
+        select(GroceryListItemCheck)
+        .where(
+            GroceryListItemCheck.user_id == user_id,
+            GroceryListItemCheck.week_start == week_start,
+            GroceryListItemCheck.item_key == item_key,
+        )
+        .with_for_update()
+    )
+    res = await session.execute(update_stmt)
+    row = res.scalar_one_or_none()
+    if row is not None:
+        row.checked = checked
+        await session.flush()
+        return
+
+    try:
+        session.add(
+            GroceryListItemCheck(user_id=user_id, week_start=week_start, item_key=item_key, checked=checked)
+        )
+        await session.flush()
+    except IntegrityError:
+        # Concurrent insert won the race; retry as update.
+        await session.rollback()
+        res2 = await session.execute(update_stmt)
+        row2 = res2.scalar_one_or_none()
+        if row2 is None:
+            raise
+        row2.checked = checked
+        await session.flush()
+
+
+async def bulk_upsert_grocery_item_checks(
+    *, session: AsyncSession, user_id: uuid.UUID, week_start: date, items: list[tuple[str, bool]]
+) -> None:
+    for item_key, checked in items:
+        await upsert_grocery_item_check(
+            session=session,
+            user_id=user_id,
+            week_start=week_start,
+            item_key=item_key,
+            checked=checked,
+        )
 
 
 async def grocery_list_for_weekly_plan(

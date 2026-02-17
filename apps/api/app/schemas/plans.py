@@ -81,6 +81,12 @@ class WeeklyPlanDayOut(BaseModel):
         from_attributes = True
 
 
+class WeeklyPlanGenerationSummary(BaseModel):
+    locked_kept: int = 0
+    locked_changed: int = 0
+    unlocked_changed: int = 0
+
+
 class WeeklyPlanOut(BaseModel):
     id: uuid.UUID
     week_start: date
@@ -90,6 +96,9 @@ class WeeklyPlanOut(BaseModel):
     fat_g: int | None
 
     days: list[WeeklyPlanDayOut]
+
+    # Optional regen summary; present on generate endpoint.
+    generation_summary: WeeklyPlanGenerationSummary | None = None
 
     class Config:
         from_attributes = True
@@ -110,12 +119,23 @@ class GroceryListBreakdownItem(BaseModel):
 
 
 class GroceryListItemOut(BaseModel):
+    item_key: str = Field(description="Stable key for the grocery item")
     food_id: uuid.UUID
     food_name: str | None = None
     total_grams: Decimal
+    checked: bool = False
     per_recipe: list[GroceryListBreakdownItem] = Field(default_factory=list)
 
 
 class GroceryListOut(BaseModel):
     week_start: date
     items: list[GroceryListItemOut]
+
+
+class GroceryListItemCheckUpsert(BaseModel):
+    item_key: str
+    checked: bool
+
+
+class GroceryListChecksBulkUpdateRequest(BaseModel):
+    items: list[GroceryListItemCheckUpsert]
