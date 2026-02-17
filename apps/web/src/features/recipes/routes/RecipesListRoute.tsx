@@ -34,13 +34,22 @@ export function RecipesListRoute() {
   const recipesQuery = useRecipesListQuery();
 
   const filtered = useMemo(() => {
-    const items = recipesQuery.data ?? [];
+    // Defensive: in some environments the query data can be a wrapped object
+    // (e.g. `{ items: [...] }`) due to API response shape mismatch.
+    const raw: any = recipesQuery.data;
+    const items = Array.isArray(raw) ? raw : (raw?.items ?? []);
+
     const q = query.trim().toLowerCase();
     if (!q) return items;
-    return items.filter((r) => r.name.toLowerCase().includes(q));
+    return items.filter((r: any) => String(r.name ?? "").toLowerCase().includes(q));
   }, [query, recipesQuery.data]);
 
-  const showEmptyState = recipesQuery.isSuccess && (recipesQuery.data?.length ?? 0) === 0;
+  const showEmptyState =
+    recipesQuery.isSuccess &&
+    ((Array.isArray(recipesQuery.data)
+      ? recipesQuery.data.length
+      : (recipesQuery.data as any)?.items?.length) ??
+      0) === 0;
 
   return (
     <Container maxWidth="md" sx={{ py: 2 }}>

@@ -11,11 +11,21 @@ import { TargetsRoute } from "../features/targets/routes/TargetsRoute";
 import { RecipesListRoute } from "../features/recipes/routes/RecipesListRoute";
 import { RecipeBuilderRoute } from "../features/recipes/routes/RecipeBuilderRoute";
 import { RecipeDetailsRoute } from "../features/recipes/routes/RecipeDetailsRoute";
+import { AuthRoute } from "../features/auth/routes/AuthRoute";
+import { RequireAuth } from "./RequireAuth";
 
 export const router = createBrowserRouter([
   {
+    path: "/auth",
+    element: <AuthRoute />,
+  },
+  {
     path: "/",
-    element: <AppShell />,
+    element: (
+      <RequireAuth>
+        <AppShell />
+      </RequireAuth>
+    ),
     children: [
       { index: true, element: <Navigate to="/today" replace /> },
       { path: "today", element: <TodayRoute /> },

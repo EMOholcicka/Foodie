@@ -80,4 +80,20 @@ describe("RecipesListRoute", () => {
     expect(screen.getByText("Chicken soup")).toBeInTheDocument();
     expect(screen.queryByText("Pasta")).toBeNull();
   });
+
+  it("does not crash when the list query accidentally returns a wrapped response object", async () => {
+    // Regression guard for the Docker runtime issue where `/recipes` returned `{ items: [...] }`
+    // and `filtered.map` crashed.
+    vi.mocked(useRecipesListQuery).mockReturnValue({
+      data: { items: [makeRecipe({ id: "a", name: "Chicken soup" })] },
+      isSuccess: true,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as any);
+
+    renderRoute();
+
+    expect(screen.getByText("Chicken soup")).toBeInTheDocument();
+  });
 });

@@ -17,9 +17,19 @@ RUN apt-get update \
 FROM base AS dev
 
 # Install runtime deps (no lock yet in Phase 1)
+# Keep this list in sync with [project].dependencies in pyproject.toml
 COPY pyproject.toml /app/pyproject.toml
 RUN pip install --no-cache-dir -U pip \
-  && pip install --no-cache-dir "fastapi>=0.110" "uvicorn[standard]>=0.27" "psycopg[binary]>=3.1"
+  && pip install --no-cache-dir \
+    "fastapi>=0.110" \
+    "uvicorn[standard]>=0.27" \
+    "psycopg[binary]>=3.1" \
+    "sqlalchemy[asyncio]>=2.0" \
+    "alembic>=1.13" \
+    "pydantic-settings>=2.2" \
+    "argon2-cffi>=23.1" \
+    "pyjwt>=2.8" \
+    "email-validator>=2.1"
 
 COPY app /app/app
 
@@ -35,7 +45,16 @@ RUN addgroup --system app \
 
 COPY pyproject.toml /app/pyproject.toml
 RUN pip install --no-cache-dir -U pip \
-  && pip install --no-cache-dir "fastapi>=0.110" "uvicorn[standard]>=0.27" "psycopg[binary]>=3.1"
+  && pip install --no-cache-dir \
+    "fastapi>=0.110" \
+    "uvicorn[standard]>=0.27" \
+    "psycopg[binary]>=3.1" \
+    "sqlalchemy[asyncio]>=2.0" \
+    "alembic>=1.13" \
+    "pydantic-settings>=2.2" \
+    "argon2-cffi>=23.1" \
+    "pyjwt>=2.8" \
+    "email-validator>=2.1"
 
 COPY app /app/app
 RUN chown -R app:app /app

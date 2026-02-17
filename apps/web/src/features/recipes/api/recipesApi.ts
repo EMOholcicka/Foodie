@@ -47,8 +47,11 @@ export type RecipeItemUpdateRequest = {
 };
 
 export async function listRecipes(): Promise<Recipe[]> {
-  const { data } = await http.get<Recipe[]>("/recipes");
-  return data;
+  // API may return either a bare array (legacy) OR a wrapped list response.
+  // In Docker/dev this was observed to be `{ items: Recipe[] }`, which caused
+  // `filtered.map is not a function` in the list route.
+  const { data } = await http.get<Recipe[] | { items: Recipe[] }>("/recipes");
+  return Array.isArray(data) ? data : data.items;
 }
 
 export async function getRecipe(recipeId: string): Promise<Recipe> {

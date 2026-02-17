@@ -9,11 +9,14 @@ import {
   Box,
   BottomNavigation,
   BottomNavigationAction,
+  Button,
   Container,
   Toolbar,
   Typography,
 } from "@mui/material";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
+
+import { clearTokens } from "../../shared/api/auth";
 
 const navItems = [
   { label: "Today", icon: <TodayIcon />, to: "/today" },
@@ -38,11 +41,28 @@ export function AppShell() {
     <Box sx={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
       <AppBar position="sticky" elevation={0} color="transparent">
         <Toolbar>
-          <Container maxWidth="md" sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <Container
+            maxWidth="md"
+            sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}
+          >
             <Typography variant="h6">Foodie</Typography>
-            <Typography variant="caption" color="text.secondary">
-              Phase 7
-            </Typography>
+
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Phase 7
+              </Typography>
+              <Button
+                size="small"
+                variant="text"
+                color="inherit"
+                onClick={() => {
+                  clearTokens();
+                  navigate("/auth", { replace: true });
+                }}
+              >
+                Logout
+              </Button>
+            </Box>
           </Container>
         </Toolbar>
       </AppBar>

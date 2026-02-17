@@ -24,8 +24,14 @@ export type UpdateWeightRequest = {
 };
 
 export async function listWeights(params?: { from?: string; to?: string }): Promise<WeightEntry[]> {
-  const { data } = await http.get<WeightListResponse>("/weights", { params });
-  return data.items;
+  // API response shape differs between environments:
+  // - `{ items: WeightEntry[] }` (expected)
+  // - `{ weights: WeightEntry[] }` (observed in Docker)
+  // - `WeightEntry[]` (legacy)
+  const { data } = await http.get<WeightListResponse | { weights: WeightEntry[] } | WeightEntry[]>("/weights", { params });
+  if (Array.isArray(data)) return data;
+  if ("items" in data) return data.items;
+  return data.weights;
 }
 
 export async function createWeight(req: CreateWeightRequest): Promise<WeightEntry> {

@@ -12,6 +12,7 @@ dependencies = [
   "pydantic-settings>=2.2",
   "argon2-cffi>=23.1",
   "pyjwt>=2.8",
+  "email-validator>=2.1", # required by pydantic.EmailStr
 ]
 
 [project.optional-dependencies]

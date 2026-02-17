@@ -361,7 +361,18 @@ export function WeeklyPlanRoute() {
 
             <Box>
               <FormLabel component="legend">Training schedule</FormLabel>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 1, flexWrap: "wrap" }}>
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={1}
+                sx={{
+                  mt: 1,
+                  flexWrap: "wrap",
+                  alignItems: "flex-start",
+                  // prevent overlap when the row wraps (MUI's `spacing` only sets gaps for the primary axis)
+                  rowGap: 1,
+                  columnGap: 1,
+                }}
+              >
                 {(
                   [
                     ["mon", "Mon"],
