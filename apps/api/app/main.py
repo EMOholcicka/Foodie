@@ -7,6 +7,7 @@ from app.routes.auth import router as auth_router
 from app.routes.days import router as days_router
 from app.routes.foods import router as foods_router
 from app.routes.health import router as health_router
+from app.routes.plans import router as plans_router
 from app.routes.recipes import router as recipes_router
 from app.routes.targets import router as targets_router
 from app.routes.weights import router as weights_router
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(days_router)
     app.include_router(targets_router)
     app.include_router(recipes_router)
+    app.include_router(plans_router)
 
     return app
 

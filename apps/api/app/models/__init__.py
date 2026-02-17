@@ -8,4 +8,5 @@ from app.models.recipe import Recipe, RecipeItem  # noqa: F401
 from app.models.refresh_session import RefreshSession  # noqa: F401
 from app.models.user import User  # noqa: F401
 from app.models.user_target import UserTarget  # noqa: F401
+from app.models.weekly_plan import WeeklyPlan, WeeklyPlanDay, WeeklyPlanMeal  # noqa: F401
 from app.models.weight_entry import WeightEntry  # noqa: F401

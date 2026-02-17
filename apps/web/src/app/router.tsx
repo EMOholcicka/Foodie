@@ -2,6 +2,8 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import { AppShell } from "./shell/AppShell";
 import { PlaceholderScreen } from "./shell/PlaceholderScreen";
+import { WeeklyPlanRoute } from "../features/plans/routes/WeeklyPlanRoute";
+import { GroceryListRoute } from "../features/plans/routes/GroceryListRoute";
 import { WeightRoute } from "../features/weight/routes/WeightRoute";
 import { TodayRoute } from "../features/days/routes/TodayRoute";
 import { DayRoute } from "../features/days/routes/DayRoute";
@@ -18,7 +20,8 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/today" replace /> },
       { path: "today", element: <TodayRoute /> },
       { path: "day/:date", element: <DayRoute /> },
-      { path: "plan", element: <PlaceholderScreen title="Plan" /> },
+      { path: "plan", element: <WeeklyPlanRoute /> },
+      { path: "plan/grocery", element: <GroceryListRoute /> },
       { path: "recipes", element: <RecipesListRoute /> },
       { path: "recipes/new", element: <RecipeBuilderRoute /> },
       { path: "recipes/:recipeId", element: <RecipeDetailsRoute /> },

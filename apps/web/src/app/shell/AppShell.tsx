@@ -1,4 +1,4 @@
-import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
+import EventNoteIcon from "@mui/icons-material/EventNote";
 import MonitorWeightIcon from "@mui/icons-material/MonitorWeight";
 import RestaurantMenuIcon from "@mui/icons-material/RestaurantMenu";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -17,7 +17,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 const navItems = [
   { label: "Today", icon: <TodayIcon />, to: "/today" },
-  { label: "Plan", icon: <FitnessCenterIcon />, to: "/plan" },
+  { label: "Plan", icon: <EventNoteIcon />, to: "/plan" },
   { label: "Recipes", icon: <RestaurantMenuIcon />, to: "/recipes" },
   { label: "Weight", icon: <MonitorWeightIcon />, to: "/weight" },
   { label: "Targets", icon: <TrackChangesIcon />, to: "/targets" },
@@ -38,13 +38,10 @@ export function AppShell() {
     <Box sx={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
       <AppBar position="sticky" elevation={0} color="transparent">
         <Toolbar>
-          <Container
-            maxWidth="md"
-            sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
-          >
+          <Container maxWidth="md" sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <Typography variant="h6">Foodie</Typography>
             <Typography variant="caption" color="text.secondary">
-              Phase 5
+              Phase 7
             </Typography>
           </Container>
         </Toolbar>
@@ -64,11 +61,7 @@ export function AppShell() {
         }}
       >
         <Container maxWidth="md" disableGutters>
-          <BottomNavigation
-            showLabels
-            value={value}
-            onChange={(_, next) => navigate(navItems[next]!.to)}
-          >
+          <BottomNavigation showLabels value={value} onChange={(_, next) => navigate(navItems[next]!.to)}>
             {navItems.map((i) => (
               <BottomNavigationAction key={i.to} label={i.label} icon={i.icon} />
             ))}
